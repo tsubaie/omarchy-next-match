@@ -32,6 +32,12 @@ Click it for the fixture in full — competition and round, both crests and
 names, kick-off in your local time, venue, home or away — and under it the
 next three fixtures after that one. Middle click forces a refresh.
 
+### Which competitions
+
+All of them. Fixtures are looked up **by team, not by league**, so a cup tie, a
+continental night or a domestic league game are all just "the next match" —
+whichever comes first is what the bar shows. Home and away alike.
+
 ### While the match is on
 
 `eventsnext` lists only fixtures that have **not** started, so a match drops out
@@ -41,8 +47,11 @@ before kick-off and stops once the match has left it. Nothing to configure;
 turn it off with `showLive` if you would rather not know before you watch it
 back.
 
-Early in a season only a round or two is published, so the list fills in as
-fixtures are announced rather than always holding three.
+**The next three only appear with a personal key.** TheSportsDB's shared test
+key returns exactly one upcoming fixture per team, so on the default setup that
+list is empty and says so. A personal key returns ten, which fills it. The
+fixture itself, the crests, the countdown and live scores all work on the shared
+key.
 
 ## Install
 
@@ -113,8 +122,10 @@ omarchy bar set tsubaie.next-match showBadge false --json
 | `icon` | `⚽` | Shown when there is no fixture to draw |
 | `hideWhenIdle` | `false` | Take no space at all when nothing is scheduled |
 
-There is no key field. If you want your own TheSportsDB key rather than the
-shared one, `omarchy bar set tsubaie.next-match apiKey <key>` is honoured.
+There is no key field, because the widget works without one. If you want your
+own TheSportsDB key — it lifts the shared key's one-fixture limit to ten, which
+is what fills the "Then" list, and avoids its rate limiting — set it with
+`omarchy bar set tsubaie.next-match apiKey <key>`.
 
 ## Development
 

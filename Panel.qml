@@ -818,12 +818,15 @@ Panel {
             }
           }
 
+          // Be straight about why this is empty. TheSportsDB's shared key
+          // returns exactly one upcoming fixture per team; the list needs a
+          // personal key, not a schedule that has not been published.
           Text {
             width: body.width
             visible: root.laterFixtures.length === 0
             wrapMode: Text.WordWrap
             textFormat: Text.PlainText
-            text: "Nothing further published yet."
+            text: "The shared TheSportsDB key returns only the next fixture. A personal key lists ten — set it with:  omarchy bar set tsubaie.next-match apiKey <key>"
             color: Qt.darker(root.fg, 1.6)
             font.family: root.fontFam
             font.pixelSize: Style.font.caption
