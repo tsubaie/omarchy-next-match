@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "author": "tsubaie",
   "license": "MIT",
-  "description": "Your team's next fixture in the bar, counting down to kick-off.",
+  "description": "Your team's next fixture in the bar, with their crest, counting down to kick-off.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Next Match",
-    "description": "Your team's next fixture in the bar, counting down to kick-off.",
+    "description": "Your team's next fixture in the bar, with their crest, counting down to kick-off.",
     "category": "Info",
     "allowMultiple": false,
     "defaultSection": "center",
@@ -22,44 +22,32 @@
       "icon": "⚽",
       "refreshMinutes": 60,
       "showLive": true,
-      "queryMode": "next",
-      "provider": "thesportsdb"
+      "showBadge": true
     },
     "schema": [
       {
-        "key": "provider",
-        "type": "enum",
-        "label": "Data source",
-        "options": [
-          "thesportsdb",
-          "api-football"
-        ],
-        "defaultValue": "thesportsdb",
-        "description": "Where fixtures come from. TheSportsDB is free, needs no key of your own, and covers leagues api-football's free tier locks away — including the Saudi Pro League. Choose api-football only if you have a paid key: its free plan cannot read the current season, so it cannot answer this widget's question at all."
-      },
-      {
-        "key": "apiKey",
-        "type": "string",
-        "label": "API key (optional)",
-        "defaultValue": "",
-        "description": "Only needed for api-football, where it is required. TheSportsDB works without one on its shared test key; supply your own TheSportsDB key here if you have one and want your own rate limit. Paste it, or keep it out of shell.json with file:~/.config/omarchy/next-match.key or env:API_FOOTBALL_KEY. Either way it is never passed on a command line, where any local user could read it out of ps."
-      },
-      {
         "key": "teamId",
         "type": "integer",
-        "label": "Team ID",
+        "label": "Team",
         "min": 0,
-        "max": 9999999,
+        "max": 99999999,
         "step": 1,
         "defaultValue": 0,
-        "description": "Numeric team id, from whichever source you picked — they are different numbers. Use the search box in the widget's own settings panel to find it by name."
+        "description": "TheSportsDB's numeric team id. You should not have to type this: click the widget and search for your club by name, or by league name to browse it."
+      },
+      {
+        "key": "showBadge",
+        "type": "boolean",
+        "label": "Show the club crest",
+        "defaultValue": true,
+        "description": "Puts the opponent's crest in the bar in place of the icon. Off falls back to the icon, as it does anyway while a crest is still loading or missing."
       },
       {
         "key": "showLive",
         "type": "boolean",
         "label": "Show the score while the match is on",
         "defaultValue": true,
-        "description": "The pill becomes a live scoreline once the match kicks off, and polls every 5 minutes while it runs. Off leaves it on the kick-off label and spends nothing extra, which is the setting to pick if you would rather not know before you watch it back."
+        "description": "The pill becomes a live scoreline once the match kicks off. Off leaves it on the kick-off label, which is the setting to pick if you would rather not know before you watch it back."
       },
       {
         "key": "refreshMinutes",
@@ -69,33 +57,21 @@
         "max": 720,
         "step": 15,
         "defaultValue": 60,
-        "description": "Minutes between checks when the next match is more than a day away. This is only a floor: the widget already slows to 6 hours when nothing is close and tightens to 15 minutes near kick-off, so the free plan's 100 requests a day is never in danger. Raise it if you share a key across machines."
+        "description": "Minutes between checks when the next match is more than a day away. Only a floor: the widget already slows to 6 hours when nothing is close and tightens to 5 minutes during a match."
       },
       {
         "key": "icon",
         "type": "string",
         "label": "Icon",
         "defaultValue": "⚽",
-        "description": "Glyph shown before the label. Any emoji or Nerd Font glyph."
+        "description": "Glyph shown when there is no crest to show. Any emoji or Nerd Font glyph."
       },
       {
         "key": "hideWhenIdle",
         "type": "boolean",
         "label": "Hide when nothing is scheduled",
         "defaultValue": false,
-        "description": "Off-season and international breaks leave no fixture to show. On, the widget takes no space at all until one appears, rather than sitting there saying so."
-      },
-      {
-        "key": "queryMode",
-        "type": "enum",
-        "label": "Fixture query",
-        "options": [
-          "next",
-          "range",
-          "season"
-        ],
-        "defaultValue": "next",
-        "description": "How the next fixture is asked for. 'next' is one request and exactly the right answer, but the free plan does not accept it. The widget detects that refusal on its own and drops to 'range' (this season plus a date window) and then 'season' (the whole season, filtered locally), remembering what worked — so you should not need to touch this. Set it by hand only to pin a mode."
+        "description": "Off-season and international breaks leave no fixture to show. On, the widget takes no space at all until one appears."
       }
     ]
   }

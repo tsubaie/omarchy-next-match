@@ -1,34 +1,37 @@
 # Next Match for Omarchy
 
-**Your team's next fixture in the bar, counting down to kick-off.**
+**Your team's next fixture in the bar, with both crests, counting down to
+kick-off.**
 
-A bar widget for the [Omarchy](https://omarchy.org) shell. Give it your team
-and the pill tells you who you play next and how long you have to wait.
-
-Two data sources:
-
-- **TheSportsDB** (default) — free, **no key needed**, and covers leagues
-  api-football's free tier locks away, including the Saudi Pro League.
-- **api-football** — needs a **paid** key. Its free plan is capped at seasons
-  2022-2024 and rejects the `next` parameter, so it cannot read the current
-  season and cannot answer this widget's question at all. The widget detects
-  that and says so rather than sitting there blank.
+A bar widget for the [Omarchy](https://omarchy.org) shell. Pick your club and
+it just runs — **no API key, no account, nothing to paste.** Data comes from
+[TheSportsDB](https://www.thesportsdb.com), which is free and covers leagues
+the big providers put behind paid plans, the Saudi Pro League among them.
 
 ## What it shows
 
-The label adapts to how close the match is, because "Saturday" is the useful
-answer three days out and "in 12m" is the useful answer on the day:
+In the bar, both clubs with their crests and how long you have to wait:
 
-| When | Pill |
-|------|------|
-| More than a day away | `⚽ ARS  Sat 18:30` |
-| Match day | `⚽ vs Arsenal  in 4h` |
-| Nearly kick-off | `⚽ vs Arsenal  in 12m` |
-| While it is on | `⚽ LIV 2 - 1 ARS  67'` |
+```
+  [crest] Al-Hilal v Al-Ahli [crest]   in 2h
+```
 
-`vs` means home, `at` means away. Left click opens a panel with the
-competition, the full kick-off time, the venue and the countdown. Middle click
-forces a refresh.
+The trailing part adapts to how close the match is, because "Saturday" is the
+useful answer three days out and "in 12m" is the useful answer on the day:
+
+| When | Trailing |
+|------|----------|
+| More than a day away | `Sat 18:30` |
+| Match day | `in 4h` |
+| Nearly kick-off | `in 12m` |
+| While it is on | the scoreline replaces the `v`, with `67'` |
+
+Click it for the fixture in full — competition and round, both crests and
+names, kick-off in your local time, venue, home or away — and under it the
+next three fixtures after that one. Middle click forces a refresh.
+
+Early in a season only a round or two is published, so the list fills in as
+fixtures are announced rather than always holding three.
 
 ## Install
 
@@ -36,95 +39,25 @@ forces a refresh.
 omarchy plugin add https://github.com/tsubaie/omarchy-next-match.git --enable
 ```
 
-Click the pill. Its settings panel opens by itself until the widget is usable —
+Click the pill, search your club by name, click it. That is the whole setup.
+
 Omarchy 4 renders no settings form for a third-party bar widget, so the plugin
-carries its own. Pick a data source, search for your team, click it. That is the
-whole setup on TheSportsDB; there is no key to paste.
+carries its own; it opens by itself until a team is picked, and from a "Change
+team" button afterwards.
 
-Everything is also settable from the command line, which writes through the
-running shell (and leaves a symlinked `shell.json` a symlink):
+### If the search cannot find your club
 
-```bash
-omarchy bar set tsubaie.next-match provider thesportsdb
-omarchy bar set tsubaie.next-match teamId 136013 --json
-```
+TheSportsDB matches against an alternate-names field, so punctuation throws it:
+`Al-Hilal` returns nothing where `Al Hilal SFC` finds it. The widget already
+retries with punctuation loosened, and then treats what you typed as a **league
+name** and lists that league's clubs — so typing `Saudi-Arabian Pro League`
+gets you there when the club name will not.
 
-### Finding your team id
+## Polling
 
-Use the search box in the widget's settings panel. Team ids differ between the
-two sources, so switching source clears the id rather than pointing you at a
-stranger.
-
-For api-football there is also a CLI helper:
-
-```bash
-~/.config/omarchy/plugins/tsubaie.next-match/scripts/find-team liverpool
-```
-
-(If you have not set the key yet, it prompts for one without echoing it.)
-
-```
-ID        TEAM                              CODE  COUNTRY
-40        Liverpool                         LIV   England
-```
-
-It reuses the key you already configured, so you only paste it once.
-
-## Keeping the key out of your dotfiles
-
-Widget settings live in `~/.config/omarchy/shell.json`. If you sync that file
-to a **public** repository, a pasted key goes with it. Two alternatives are
-accepted in the same field:
-
-```
-file:~/.config/omarchy/next-match.key    read the key from a file
-env:API_FOOTBALL_KEY                     read it from the environment
-```
-
-```bash
-install -m 600 /dev/null ~/.config/omarchy/next-match.key
-printf %s 'your-key-here' > ~/.config/omarchy/next-match.key
-```
-
-For `env:`, the variable has to be exported before the shell starts — put it in
-`~/.config/uwsm/env` rather than `~/.bashrc`, which the Omarchy shell does not
-read.
-
-However the key is supplied, it is passed to `curl` through a config file on
-stdin and reaches the request from the process environment. It is never an
-argument to anything, so it does not show up in `ps` for other users on the
-machine.
-
-## Free plan: the `next` parameter
-
-api-football's free plan **rejects the `next` parameter**, which is the obvious
-way to ask for one upcoming fixture. The widget does not require you to know or
-care: it asks the best way first, and when the API refuses the query — as
-opposed to refusing your key — it drops to the next shape and remembers what
-worked.
-
-| Mode | Query | Notes |
-|------|-------|-------|
-| `next` | `?team=X&next=1` | One request, exact answer. Paid plans. |
-| `range` | `?team=X&season=…&from=…&to=…` | This season within a 120-day window, filtered locally. |
-| `season` | `?team=X&season=…` | Whole season, filtered locally. Biggest payload, widest support. |
-
-The working mode is saved as `queryMode`, so the fallback costs a couple of
-extra requests once, not on every poll. To see exactly what your account
-allows:
-
-```bash
-~/.config/omarchy/plugins/tsubaie.next-match/scripts/plan-probe
-```
-
-It prints your plan, your request count, which of the queries above succeed,
-and which seasons your key can see.
-
-## Staying inside the free plan
-
-The free api-football plan allows **100 requests a day**, reset at 00:00 UTC.
-A fixed poll would spend that before lunch — every 5 minutes is 288 requests —
-so the widget paces itself by how soon the answer could actually change:
+TheSportsDB asks for courtesy rather than enforcing a hard daily cap, and a
+fixture days away does not change minute to minute, so the widget paces itself
+by how soon the answer could actually change:
 
 | Situation | Interval |
 |-----------|----------|
@@ -134,8 +67,7 @@ so the widget paces itself by how soon the answer could actually change:
 | Match in progress (if live scores are on) | 5 minutes |
 
 A worst-case match day — a full day of polling, an hour of tightening, and a
-whole match streamed live — costs **52 requests**. There is a test that asserts
-this stays under 100.
+whole match streamed live — is about **50 requests**.
 
 The last response is cached to `~/.cache/omarchy-next-match/fixture.json`, so
 restarting the shell shows the fixture immediately instead of spending a
@@ -144,18 +76,24 @@ to survive reload storms.
 
 ## Settings
 
-All of these are set with `omarchy bar set tsubaie.next-match <key> <value>`
-(add `--json` for numbers and booleans, so they are written as JSON types
-rather than strings).
+All optional, and all settable from the command line too — which writes through
+the running shell, so a symlinked `shell.json` stays a symlink:
+
+```bash
+omarchy bar set tsubaie.next-match showBadge false --json
+```
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `apiKey` | `""` | The key, or `file:` / `env:` reference |
-| `teamId` | `0` | api-football's numeric team id |
+| `teamId` | `0` | TheSportsDB team id. Set by the search, not by hand. |
+| `showBadge` | `true` | Crests in the bar. Off falls back to the icon. |
 | `showLive` | `true` | Turn the pill into a live scoreline during the match |
 | `refreshMinutes` | `60` | Floor for the poll interval when nothing is close |
-| `icon` | `⚽` | Any emoji or Nerd Font glyph |
+| `icon` | `⚽` | Shown when there is no fixture to draw |
 | `hideWhenIdle` | `false` | Take no space at all when nothing is scheduled |
+
+There is no key field. If you want your own TheSportsDB key rather than the
+shared one, `omarchy bar set tsubaie.next-match apiKey <key>` is honoured.
 
 ## Development
 

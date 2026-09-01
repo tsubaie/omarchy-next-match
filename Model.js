@@ -3,43 +3,6 @@
 // input always renders the same output and the whole file is testable under
 // Node (see test/model.test.js).
 
-// ---------------------------------------------------------------- api-football
-
-// The API answers 200 with an `errors` payload rather than an HTTP error code,
-// so a "successful" response still has to be interrogated. `errors` is an
-// object for auth/parameter problems and an empty ARRAY when all is well,
-// which is why this checks for keys rather than truthiness.
-function apiError(payload) {
-  if (!payload || typeof payload !== "object") return "Bad response"
-  var e = payload.errors
-  if (!e) return ""
-  if (Array.isArray(e)) return e.length > 0 ? String(e[0]) : ""
-  var keys = Object.keys(e)
-  if (keys.length === 0) return ""
-  // token errors are the common case and deserve a short, actionable line
-  // rather than the API's paragraph pointing at its own documentation.
-  if (keys.indexOf("token") !== -1) return "Check your API key"
-  if (keys.indexOf("requests") !== -1) return "Daily request limit reached"
-  return String(e[keys[0]])
-}
-
-// The API's own words, kept verbatim for the panel. A short label belongs in
-// the bar; the reason the request was refused belongs where it can be read and
-// acted on, rather than being flattened into one of our own sentences.
-function rawApiError(payload) {
-  if (!payload || typeof payload !== "object") return ""
-  var e = payload.errors
-  if (!e || Array.isArray(e)) return ""
-  var parts = []
-  for (var k in e) parts.push(k + ": " + String(e[k]))
-  return parts.join("  ")
-}
-
-function firstFixture(payload) {
-  if (!payload || !Array.isArray(payload.response) || payload.response.length === 0) return null
-  return payload.response[0]
-}
-
 // -------------------------------------------------------------- thesportsdb
 
 // A second provider, because api-football's free plan cannot read the current
@@ -58,6 +21,24 @@ function sdbUrl(key, path) {
 function sdbNextUrl(key, teamId) { return sdbUrl(key, "eventsnext.php?id=" + teamId) }
 function sdbSearchUrl(key, query) {
   return sdbUrl(key, "searchteams.php?t=" + encodeURIComponent(String(query || "").trim()))
+}
+
+// TheSportsDB's club search is unreliable on punctuation: "Al-Hilal" finds
+// nothing where "Al Hilal SFC" finds it, because it matches the alternate-names
+// field rather than the club name. Browsing a league is exact, so a search that
+// comes back empty tries the query again as a league name.
+function sdbLeagueTeamsUrl(key, league) {
+  return sdbUrl(key, "search_all_teams.php?l=" + encodeURIComponent(String(league || "").trim()))
+}
+
+// The query, then the query with punctuation loosened. Tried in order.
+function sdbSearchVariants(query) {
+  var q = String(query || "").trim()
+  if (!q) return []
+  var out = [q]
+  var spaced = q.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim()
+  if (spaced && out.indexOf(spaced) === -1) out.push(spaced)
+  return out
 }
 
 // strTimestamp has no zone marker but is UTC — strTime is 18:00:00 where
@@ -114,7 +95,12 @@ function sdbToFixture(ev) {
     goals: { home: sdbInt(ev.intHomeScore), away: sdbInt(ev.intAwayScore) },
     league: {
       name: String(ev.strLeague || ""),
-      round: ev.intRound ? "Round " + ev.intRound : ""
+      round: ev.intRound ? "Round " + ev.intRound : "",
+      logo: String(ev.strLeagueBadge || "")
+    },
+    badges: {
+      home: String(ev.strHomeTeamBadge || ""),
+      away: String(ev.strAwayTeamBadge || "")
     }
   }
 }
@@ -143,7 +129,8 @@ function sdbTeams(payload) {
       id: sdbInt(t.idTeam),
       name: String(t.strTeam || ""),
       country: String(t.strCountry || ""),
-      code: String(t.strLeague || "")
+      code: String(t.strLeague || ""),
+      badge: String(t.strBadge || "")
     })
   }
   return out
@@ -218,6 +205,15 @@ function sides(fx, teamId) {
   }
 }
 
+// The opponent's badge. You already know which club is yours, so theirs is the
+// one worth the pixels in the bar.
+function opponentBadge(fx, teamId) {
+  if (!fx || !fx.badges) return ""
+  var s = sides(fx, teamId)
+  if (!s) return ""
+  return s.atHome ? String(fx.badges.away || "") : String(fx.badges.home || "")
+}
+
 // -------------------------------------------------------------------- countdown
 
 function countdown(ms) {
@@ -276,6 +272,48 @@ function pillLabel(fx, nowMs, opts) {
   return (s.atHome ? "vs " : "at ") + s.them.name + "  in " + countdown(delta)
 }
 
+// ------------------------------------------------------------------ selection
+
+// The fixture that is on now, or the soonest one next. A match already running
+// still has a kick-off in the past, so the window reaches back far enough to
+// keep it rather than skipping ahead to the following game.
+function pickNextFixture(payload, nowMs) {
+  var list = upcomingFixtures(payload, nowMs, 1)
+  return list.length > 0 ? list[0] : null
+}
+
+
+// Everything still to come, soonest first, with a match in progress at the
+// front. Same rules as pickNextFixture, which is now just the first of these.
+function upcomingFixtures(payload, nowMs, limit) {
+  if (!payload || !Array.isArray(payload.response)) return []
+  var live = []
+  var later = []
+  for (var i = 0; i < payload.response.length; ++i) {
+    var fx = payload.response[i]
+    var ko = kickoffMs(fx)
+    if (!isFinite(ko)) continue
+    var state = matchState(fx)
+    if (state === "live") { live.push({ fx: fx, ko: ko }); continue }
+    if (state === "finished" || state === "off") continue
+    if (ko >= nowMs - 3 * 3600 * 1000) later.push({ fx: fx, ko: ko })
+  }
+  live.sort(function(a, b) { return a.ko - b.ko })
+  later.sort(function(a, b) { return a.ko - b.ko })
+  var all = live.concat(later)
+  var out = []
+  var max = limit === undefined ? all.length : limit
+  for (var j = 0; j < all.length && out.length < max; ++j) out.push(all[j].fx)
+  return out
+}
+
+// A short "Sat 18:30" / "12 Oct" for a row in the list, built from parts the
+// caller resolves so the timezone decision stays outside this file.
+function rowWhen(parts) {
+  if (!parts) return ""
+  return parts.weekday + " " + parts.day + "  " + parts.time
+}
+
 // ---------------------------------------------------------------- refresh pacing
 
 // The free plan allows 100 requests a day, reset at 00:00 UTC, so polling is
@@ -299,149 +337,12 @@ function refreshMinutes(fx, nowMs, baseMinutes, showLive) {
   return Math.max(base, 360)
 }
 
-// -------------------------------------------------------------------- key specs
-
-// The key may be pasted directly, or kept out of shell.json with `file:` or
-// `env:`. Anyone syncing their dotfiles to a public remote wants the latter.
-function parseKeySpec(spec) {
-  var raw = String(spec === undefined || spec === null ? "" : spec).trim()
-  if (!raw) return { mode: "none", value: "" }
-  if (raw.indexOf("file:") === 0) return { mode: "file", value: raw.slice(5).trim() }
-  if (raw.indexOf("env:") === 0) return { mode: "env", value: raw.slice(4).trim() }
-  return { mode: "inline", value: raw }
-}
-
-// Shell snippet that resolves a key spec to stdout without ever putting the
-// key itself in argv, where `ps` would show it to every local user. Runs under
-// bash: `${!var}` is bash's indirect expansion, and `${var/#~/$HOME}` is how a
-// leading tilde in a configured path gets expanded, since the shell only
-// expands `~` in literals, never inside a variable.
-function keyResolverScript(spec) {
-  var parsed = parseKeySpec(spec)
-  if (parsed.mode === "file") return 'cat -- "${NM_KEY_REF/#\\~/$HOME}" 2>/dev/null'
-  if (parsed.mode === "env") return 'printf %s "${!NM_KEY_REF-}"'
-  return 'printf %s "$NM_KEY"'
-}
-
-// ------------------------------------------------------------- fixture queries
-
-// The free plan does not accept `next`, so the widget has more than one way to
-// ask the same question and remembers which one the account is allowed to use.
-//   next   — one request, exactly the next fixture. Paid plans.
-//   range  — this season plus a date window, filtered here.
-//   season — the whole season, filtered here. The last resort: biggest payload,
-//            but it is the query most plans allow.
-var QUERY_MODES = ["next", "range", "season"]
-
-function nextQueryMode(mode) {
-  var i = QUERY_MODES.indexOf(String(mode || "next"))
-  return i < 0 || i + 1 >= QUERY_MODES.length ? "" : QUERY_MODES[i + 1]
-}
-
-function isoDate(ms) {
-  var d = new Date(ms)
-  function pad(n) { return (n < 10 ? "0" : "") + n }
-  return d.getUTCFullYear() + "-" + pad(d.getUTCMonth() + 1) + "-" + pad(d.getUTCDate())
-}
-
-// api-football labels a season by the calendar year it starts in, and European
-// seasons start in August. Before then, the current season is last year's.
-function seasonFor(ms) {
-  var d = new Date(ms)
-  return d.getUTCMonth() >= 6 ? d.getUTCFullYear() : d.getUTCFullYear() - 1
-}
-
-function fixtureUrl(teamId, mode, nowMs, windowDays) {
-  var base = "https://v3.football.api-sports.io/fixtures?team=" + teamId
-  var days = windowDays === undefined ? 120 : windowDays
-  if (mode === "range")
-    return base + "&season=" + seasonFor(nowMs) +
-      "&from=" + isoDate(nowMs) + "&to=" + isoDate(nowMs + days * 86400000)
-  if (mode === "season") return base + "&season=" + seasonFor(nowMs)
-  return base + "&next=1"
-}
-
-// Why the API refused, which decides whether trying another query shape can
-// possibly help:
-//   "parameter" — this query shape is not allowed, but another might be.
-//   "season"    — the account cannot see the current season at all. No query
-//                 shape has an upcoming fixture to return, so stop: cycling
-//                 modes would only spend the daily allowance to be refused
-//                 three times instead of once.
-//   "plan"      — some other plan restriction.
-function planRefusal(payload) {
-  var raw = rawApiError(payload)
-  if (!raw) return ""
-  if (/access to this season/i.test(raw)) return "season"
-  if (/access to the \s*\w+\s*parameter/i.test(raw)) return "parameter"
-  if (/plan|subscription|upgrade|not allowed/i.test(raw)) return "plan"
-  return ""
-}
-
-function isPlanRefusal(payload) {
-  return planRefusal(payload) !== ""
-}
-
-// "…try from 2022 to 2024." -> "2022-2024", for a message that says what the
-// account can actually see instead of only what it cannot.
-function seasonHint(payload) {
-  var m = /try from (\d{4}) to (\d{4})/i.exec(rawApiError(payload))
-  return m ? m[1] + "-" + m[2] : ""
-}
-
-// From any of the query shapes, the fixture that is on now or soonest next.
-// A match already running still has a kick-off in the past, so the window
-// reaches back far enough to keep one rather than skip to the following game.
-function pickNextFixture(payload, nowMs) {
-  if (!payload || !Array.isArray(payload.response)) return null
-  var candidates = []
-  for (var i = 0; i < payload.response.length; ++i) {
-    var fx = payload.response[i]
-    var ko = kickoffMs(fx)
-    if (!isFinite(ko)) continue
-    var state = matchState(fx)
-    if (state === "live") return fx
-    if (state === "finished" || state === "off") continue
-    if (ko >= nowMs - 3 * 3600 * 1000) candidates.push({ fx: fx, ko: ko })
-  }
-  if (candidates.length === 0) return null
-  candidates.sort(function(a, b) { return a.ko - b.ko })
-  return candidates[0].fx
-}
-
 // ---------------------------------------------------------------- team search
 
-// api-football rejects a search shorter than 3 characters, so the UI can say
-// so instead of spending a request to be told.
+// Too short a query matches half the world, so the UI says so rather than
+// spending a request to be told.
 function searchValid(query) {
   return String(query || "").trim().length >= 3
-}
-
-function teamsUrl(query) {
-  return "https://v3.football.api-sports.io/teams?search=" +
-    encodeURIComponent(String(query || "").trim())
-}
-
-function parseTeams(payload) {
-  if (!payload || !Array.isArray(payload.response)) return []
-  var out = []
-  for (var i = 0; i < payload.response.length; ++i) {
-    var t = payload.response[i] && payload.response[i].team
-    if (!t || !t.id) continue
-    out.push({
-      id: t.id,
-      name: String(t.name || ""),
-      country: String(t.country || ""),
-      code: String(t.code || "")
-    })
-  }
-  return out
-}
-
-// What to show in the key field. A file:/env: reference is a path, not a
-// secret, so it stays readable; a pasted key is masked.
-function keyIsSecret(spec) {
-  return parseKeySpec(spec).mode === "inline"
 }
 
 // --------------------------------------------------------------------- sanitize
@@ -462,37 +363,27 @@ if (typeof module !== "undefined") {
     sdbUrl: sdbUrl,
     sdbNextUrl: sdbNextUrl,
     sdbSearchUrl: sdbSearchUrl,
+    sdbLeagueTeamsUrl: sdbLeagueTeamsUrl,
+    sdbSearchVariants: sdbSearchVariants,
     sdbKickoffMs: sdbKickoffMs,
     sdbStatus: sdbStatus,
     sdbToFixture: sdbToFixture,
     sdbFixtures: sdbFixtures,
     sdbTeams: sdbTeams,
-    apiError: apiError,
-    rawApiError: rawApiError,
-    firstFixture: firstFixture,
     statusShort: statusShort,
     matchState: matchState,
     kickoffMs: kickoffMs,
     shortCode: shortCode,
     sides: sides,
+    opponentBadge: opponentBadge,
     countdown: countdown,
     whenLabel: whenLabel,
     pillLabel: pillLabel,
     refreshMinutes: refreshMinutes,
-    parseKeySpec: parseKeySpec,
-    keyResolverScript: keyResolverScript,
-    nextQueryMode: nextQueryMode,
-    isoDate: isoDate,
-    seasonFor: seasonFor,
-    fixtureUrl: fixtureUrl,
-    isPlanRefusal: isPlanRefusal,
-    planRefusal: planRefusal,
-    seasonHint: seasonHint,
     pickNextFixture: pickNextFixture,
+    upcomingFixtures: upcomingFixtures,
+    rowWhen: rowWhen,
     searchValid: searchValid,
-    teamsUrl: teamsUrl,
-    parseTeams: parseTeams,
-    keyIsSecret: keyIsSecret,
     plainText: plainText,
     validTeamId: validTeamId
   }

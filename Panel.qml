@@ -6,7 +6,7 @@ import qs.Ui
 import "Model.js" as Model
 
 // Owns the fixture data: settings, fetching, caching and pacing. BarWidget.qml
-// reads `pillLabel` off this and draws the button.
+// reads `pillLabel` and `badgeUrl` off this and draws the button.
 Panel {
   id: root
   moduleName: "tsubaie.next-match"
@@ -24,60 +24,82 @@ Panel {
 
   // ------------------------------------------------------------------ settings
 
-  // "thesportsdb" (default: free, no key needed, covers leagues api-football's
-  // free tier locks away) or "api-football" (needs a paid key for the current
-  // season).
-  readonly property string provider: String(root.setting("provider", "thesportsdb"))
-  readonly property bool isSdb: provider !== "api-football"
-
-  readonly property string apiKeySpec: String(root.setting("apiKey", ""))
-  readonly property var keySpec: Model.parseKeySpec(apiKeySpec)
   readonly property int teamId: Model.validTeamId(root.setting("teamId", 0))
   readonly property bool showLive: root.setting("showLive", true) === true
+  readonly property bool showBadge: root.setting("showBadge", true) === true
   readonly property int baseMinutes: {
     var n = parseInt(root.setting("refreshMinutes", 60), 10)
     return isFinite(n) && n >= 15 ? n : 60
   }
 
-  // Which fixture query this account is allowed to use. Discovered once on a
-  // plan refusal and then remembered, so the fallback costs at most a couple of
-  // extra requests in the widget's lifetime rather than on every poll.
-  readonly property string queryMode: String(root.setting("queryMode", "next"))
+  // TheSportsDB serves this widget on its shared key, so there is nothing to
+  // paste. `apiKey` stays readable for anyone who wants their own rate limit
+  // (omarchy bar set tsubaie.next-match apiKey <key>) but no field asks for it.
+  readonly property string sdbKey: String(root.setting("apiKey", "")).trim()
 
-  readonly property bool hasKey: keySpec.mode !== "none"
-  // TheSportsDB works on its shared test key, so a team id is the only thing
-  // it actually needs from the user.
-  readonly property bool configured: (isSdb || hasKey) && teamId > 0
+  // A team is the only thing the widget actually needs.
+  readonly property bool configured: teamId > 0
 
   // --------------------------------------------------------------------- state
 
   property var fixture: null
   property string errorText: ""
-  // The API's verbatim refusal, shown in the panel so a plan problem is
-  // readable rather than guessed at.
-  property string errorDetail: ""
-  property string triedModes: ""
   property double lastFetchMs: 0
-  // Guards against the same query going out twice in a burst: a startup fetch
-  // and a fallback retry can otherwise land on the same URL a second apart and
-  // spend two of the day's requests to learn one thing.
+  property bool fetching: false
   property string lastUrl: ""
   property double lastUrlAt: 0
-  property bool fetching: false
-  property string quotaText: ""
 
-  // Advanced by a timer rather than read from Date.now() at use sites, so every
-  // binding that shows a countdown re-evaluates together.
+  // Advanced by a timer rather than read at each use site, so every binding
+  // showing a countdown re-evaluates together.
   property double nowMs: Date.now()
 
   readonly property bool idle: configured && errorText === "" && fixture === null
   readonly property bool needsAttention: !configured || errorText !== ""
 
   readonly property string cachePath: Quickshell.env("HOME") + "/.cache/omarchy-next-match/fixture.json"
-  // Resolved when a fetch starts rather than bound: `range` embeds today's
-  // date, and a binding on the ticking clock would rewrite the command line
-  // every 30 seconds.
   property string fetchUrl: ""
+
+  readonly property string badgeUrl: root.showBadge ? Model.opponentBadge(root.fixture, root.teamId) : ""
+
+  // The bar draws both clubs, so it needs the parts rather than one string:
+  // a crest cannot be interleaved into a Text.
+  readonly property string homeName: root.sidesNow ? Model.plainText(root.sidesNow.home.name) : ""
+  readonly property string awayName: root.sidesNow ? Model.plainText(root.sidesNow.away.name) : ""
+  readonly property string homeBadgeUrl: root.showBadge && root.fixture && root.fixture.badges ? root.fixture.badges.home : ""
+  readonly property string awayBadgeUrl: root.showBadge && root.fixture && root.fixture.badges ? root.fixture.badges.away : ""
+
+  // "v" normally; the scoreline once it is being played.
+  readonly property string barMiddle: {
+    if (!root.fixture) return ""
+    if (Model.matchState(root.fixture) === "live" && root.showLive) {
+      var g = root.fixture.goals || {}
+      var h = g.home === null || g.home === undefined ? 0 : g.home
+      var a = g.away === null || g.away === undefined ? 0 : g.away
+      return h + " - " + a
+    }
+    return "v"
+  }
+
+  // The clock or the countdown that trails the two clubs.
+  readonly property string barTrailing: {
+    if (!root.fixture) return ""
+    var state = Model.matchState(root.fixture)
+    if (state === "live" && root.showLive) {
+      if (Model.statusShort(root.fixture) === "HT") return "HT"
+      var el = root.fixture.fixture.status.elapsed
+      return el ? el + "'" : "live"
+    }
+    if (state === "off") return "postponed"
+    var ko = Model.kickoffMs(root.fixture)
+    var delta = ko - root.nowMs
+    if (!isFinite(delta)) return ""
+    if (delta <= 0) return "kick-off"
+    if (delta > 24 * 3600 * 1000) return root.whenParts ? Model.whenLabel(root.whenParts) : ""
+    return "in " + Model.countdown(delta)
+  }
+
+  // Up to three fixtures after the one in the hero.
+  property var laterFixtures: []
 
   readonly property var whenParts: {
     var ko = Model.kickoffMs(root.fixture)
@@ -87,9 +109,7 @@ Panel {
   }
 
   readonly property string pillLabel: {
-    // TheSportsDB needs no key of the user's own, so only api-football may ask.
-    if (!isSdb && !hasKey) return "Add API key"
-    if (teamId <= 0) return "Set team ID"
+    if (teamId <= 0) return "Pick a team"
     if (errorText !== "") return errorText
     if (fixture === null) return lastFetchMs === 0 ? "…" : "No match"
     return Model.pillLabel(root.fixture, root.nowMs, {
@@ -100,25 +120,21 @@ Panel {
   }
 
   readonly property string tooltip: {
-    if (!configured) return "Next Match — open to finish setup"
+    if (!configured) return "Next Match — click to pick a team"
     if (errorText !== "") return "Next Match — " + errorText
     if (!fixture) return "Next Match — nothing scheduled"
     var s = Model.sides(root.fixture, root.teamId)
-    if (!s) return "Next Match"
-    return s.home.name + " v " + s.away.name
+    return s ? s.home.name + " v " + s.away.name : "Next Match"
   }
 
-  // ------------------------------------------------------------------ lifecycle
+  // ------------------------------------------------------------------ fetching
 
   function refresh(force) {
     if (!configured || fetchProc.running) return
-    // A reload storm (theme switch, plugin rescan) must not spend the daily
-    // budget: ignore anything that comes back inside a minute unless a human
-    // asked for it.
+    // A reload storm (theme switch, plugin rescan) must not re-fetch on every
+    // pass: ignore anything inside a minute unless a human asked.
     if (!force && root.lastFetchMs > 0 && Date.now() - root.lastFetchMs < 60000) return
-    var url = root.isSdb
-      ? Model.sdbNextUrl(root.keySpec.mode === "inline" ? root.keySpec.value : "", root.teamId)
-      : Model.fixtureUrl(root.teamId, root.queryMode, Date.now())
+    var url = Model.sdbNextUrl(root.sdbKey, root.teamId)
     if (url === root.lastUrl && Date.now() - root.lastUrlAt < 5000) return
     root.lastUrl = url
     root.lastUrlAt = Date.now()
@@ -128,52 +144,11 @@ Panel {
   }
 
   function applyPayload(payload, fromCache) {
-    // The free plan refuses `next`. That is not a user error: try the next
-    // query shape, remember it, and say nothing.
-    var refusal = fromCache ? "" : Model.planRefusal(payload)
-    if (refusal !== "") {
-      root.errorDetail = Model.rawApiError(payload)
-      console.log("next-match: '" + root.queryMode + "' refused (" + refusal + ") — " + root.errorDetail)
-
-      // A season the account cannot see is the end of the road: every query
-      // shape asks about the same season, so there is nothing left to try.
-      if (refusal === "season") {
-        var hint = Model.seasonHint(payload)
-        root.errorText = "Plan has no current season"
-        if (hint !== "") root.errorDetail += "\n\nThis key can only read " + hint
-          + ", so there is no upcoming fixture for it to return."
-        // Nothing will change until the account does. Check twice a day rather
-        // than hourly, so an unusable key costs 2 requests a day, not 48.
-        refreshTimer.interval = 12 * 3600 * 1000
-        refreshTimer.restart()
-        return
-      }
-
-      root.triedModes = (root.triedModes ? root.triedModes + ", " : "") + root.queryMode
-      var fallback = Model.nextQueryMode(root.queryMode)
-      if (fallback !== "") {
-        persistSettings({ queryMode: fallback })
-        Qt.callLater(function() { root.refresh(true) })
-        return
-      }
-      root.errorText = "Plan cannot read fixtures"
-      return
-    }
-
-    var err = Model.apiError(payload)
-    if (err !== "") {
-      root.errorText = err
-      // A cached fixture is better than an error pill while the key is being
-      // fixed, so keep whatever is already on screen.
-      return
-    }
     root.errorText = ""
-    root.errorDetail = ""
-    root.triedModes = ""
-    root.fixture = Model.pickNextFixture(payload, Date.now())
+    var all = Model.upcomingFixtures(Model.sdbFixtures(payload), Date.now(), 4)
+    root.fixture = all.length > 0 ? all[0] : null
+    root.laterFixtures = all.slice(1, 4)
     if (!fromCache) root.lastFetchMs = Date.now()
-    if (payload && payload.paging !== undefined && payload.results !== undefined)
-      root.quotaText = ""
     scheduleNext()
   }
 
@@ -181,15 +156,14 @@ Panel {
     root.fetching = false
     var text = String(raw || "").trim()
     if (text === "") {
-      // curl failed (offline, DNS, timeout). Keep the last good fixture and
-      // try again on the normal schedule rather than blanking the bar.
+      // curl failed (offline, DNS, timeout). Keep the last good fixture rather
+      // than blanking the bar, and try again on the normal schedule.
       root.errorText = root.fixture ? "" : "Offline"
       scheduleNext()
       return
     }
     try {
-      var parsed = JSON.parse(text)
-      applyPayload(root.isSdb ? Model.sdbFixtures(parsed) : parsed, false)
+      applyPayload(JSON.parse(text), false)
     } catch (e) {
       root.errorText = "Bad response"
       scheduleNext()
@@ -201,10 +175,7 @@ Panel {
     var raw = String(text || "").trim()
     if (raw === "") return
     try {
-      var parsedCache = JSON.parse(raw)
-      applyPayload(root.isSdb ? Model.sdbFixtures(parsedCache) : parsedCache, true)
-      // Cached data is shown immediately but is not proof of a recent fetch;
-      // refresh() decides on its own whether the network is due.
+      applyPayload(JSON.parse(raw), true)
     } catch (e) {
       // A corrupt cache is not worth reporting; the next fetch overwrites it.
     }
@@ -217,8 +188,7 @@ Panel {
   }
 
   onConfiguredChanged: if (configured) refresh(true)
-  onTeamIdChanged: { root.fixture = null; root.errorText = ""; if (configured) refresh(true) }
-  onApiKeySpecChanged: { root.errorText = ""; if (configured) refresh(true) }
+  onTeamIdChanged: { root.fixture = null; root.laterFixtures = []; root.errorText = ""; if (configured) refresh(true) }
 
   Component.onCompleted: {
     cacheFile.reload()
@@ -252,22 +222,16 @@ Panel {
     watchChanges: false
     printErrors: false
     onLoaded: root.loadCache(text())
-    onLoadFailed: function(error) { /* no cache yet; first fetch writes one */ }
+    onLoadFailed: function(error) { /* no cache yet; the first fetch writes one */ }
   }
 
-  // The key reaches bash through the environment and the header reaches curl
-  // through a config file on stdin, so it appears in neither process's argv.
-  // `ps` on a shared machine shows the URL and nothing else.
+  // The URL travels in the environment and reaches curl through a config file
+  // on stdin, so a personal key put in the path stays out of argv.
   Process {
     id: fetchProc
     running: false
     command: ["bash", "-c", root.fetchScript]
-    environment: ({
-      "NM_KEY": root.keySpec.mode === "inline" ? root.keySpec.value : "",
-      "NM_KEY_REF": root.keySpec.mode === "inline" ? "" : root.keySpec.value,
-      "NM_URL": root.fetchUrl,
-      "NM_CACHE": root.cachePath
-    })
+    environment: ({ "NM_URL": root.fetchUrl, "NM_CACHE": root.cachePath })
     // onStreamFinished fires even when curl dies early, with empty text, so
     // there is no need for an onExited handler to clear `fetching` as well.
     stdout: StdioCollector {
@@ -277,10 +241,7 @@ Panel {
   }
 
   readonly property string fetchScript:
-    'key=$(' + Model.keyResolverScript(root.apiKeySpec) + ')\n' +
-    'key=$(printf %s "$key" | tr -d "[:space:]")\n' +
-    (root.isSdb ? '' : 'if [ -z "$key" ]; then printf %s \'{"errors":{"token":"missing"}}\'; exit 0; fi\n') +
-    'out=$(printf \'header = "x-apisports-key: %s"\\nurl = "%s"\\n\' "$key" "$NM_URL" | curl -fsS --max-time 20 -K -) || out=""\n' +
+    'out=$(printf \'url = "%s"\\n\' "$NM_URL" | curl -fsS --max-time 20 -K -) || out=""\n' +
     'if [ -n "$out" ]; then mkdir -p "$(dirname "$NM_CACHE")" && printf %s "$out" > "$NM_CACHE".tmp && mv -f "$NM_CACHE".tmp "$NM_CACHE"; fi\n' +
     'printf %s "$out"\n'
 
@@ -288,11 +249,10 @@ Panel {
 
   // Omarchy 4 renders no settings form for a third-party bar widget — the
   // manifest schema is metadata nothing consumes yet — so the plugin carries
-  // its own. Writing goes through the shell's own updateEntryInline, the same
-  // call the built-in clock uses to persist a cycled format: it is in-process,
-  // so the key never becomes an argument to anything, and it writes shell.json
-  // through the shell's FileView, which follows a symlink instead of replacing
-  // it (the case if you stow your dotfiles).
+  // its own. Writing goes through the shell's own updateEntryInline, the call
+  // the built-in clock uses to persist a cycled format: in-process, and it
+  // writes shell.json through the shell's FileView, which follows a symlink
+  // instead of replacing it (the case if you stow your dotfiles).
   property bool showSettings: false
   readonly property bool settingsOpen: showSettings || !configured
 
@@ -300,6 +260,7 @@ Panel {
   property var searchResults: []
   property string searchNote: ""
   property bool searching: false
+  property var searchQueue: []
 
   function persistSettings(values) {
     var entry = { id: root.moduleName }
@@ -312,55 +273,64 @@ Panel {
       root.bar.shell.updateEntryInline(root.moduleName, entry)
   }
 
-  function saveFields() {
-    var team = parseInt(String(teamField.text).trim(), 10)
-    persistSettings({
-      apiKey: String(keyField.text).trim(),
-      teamId: isFinite(team) && team > 0 ? team : 0
-    })
-    root.savedNote = "Saved"
+  function pickTeam(id, name) {
+    root.searchResults = []
+    root.searchQueue = []
+    root.searchNote = ""
+    searchField.text = ""
+    root.savedNote = "Now following " + name
     savedNoteTimer.restart()
     root.errorText = ""
-    root.refresh(true)
+    persistSettings({ teamId: id })
+    root.showSettings = false
   }
 
-  function syncFields() {
-    keyField.text = root.apiKeySpec
-    teamField.text = root.teamId > 0 ? String(root.teamId) : ""
-  }
-
-  function pickTeam(id, name) {
-    teamField.text = String(id)
-    root.searchResults = []
-    root.searchNote = "Selected " + name
-    saveFields()
-  }
-
+  // TheSportsDB's club search misses on punctuation and is inconsistent about
+  // alternate names, so one query is not enough: try the name, then the name
+  // with punctuation loosened, then the same text as a league to browse. The
+  // first that returns anything wins.
   function searchTeams() {
     var q = String(searchField.text).trim()
     if (!Model.searchValid(q)) { root.searchNote = "Type at least 3 characters"; return }
-    if (!isSdb && !hasKey) { root.searchNote = "Add your API key first"; return }
     if (searchProc.running) return
+
+    var queue = []
+    var variants = Model.sdbSearchVariants(q)
+    for (var i = 0; i < variants.length; ++i)
+      queue.push(Model.sdbSearchUrl(root.sdbKey, variants[i]))
+    queue.push(Model.sdbLeagueTeamsUrl(root.sdbKey, q))
+
+    root.searchQueue = queue
     root.searchResults = []
     root.searchNote = "Searching…"
     root.searching = true
+    runNextSearch()
+  }
+
+  function runNextSearch() {
+    if (root.searchQueue.length === 0) {
+      root.searching = false
+      root.searchNote = "Nothing matched. Try the full club name, or a league name to browse it."
+      return
+    }
+    var queue = root.searchQueue.slice()
+    root.searchUrl = queue.shift()
+    root.searchQueue = queue
     searchProc.running = true
   }
 
+  property string searchUrl: ""
+
   function onSearched(raw) {
-    root.searching = false
     var text = String(raw || "").trim()
-    if (text === "") { root.searchNote = "No answer — check your connection"; return }
-    try {
-      var payload = JSON.parse(text)
-      var err = Model.apiError(payload)
-      if (err !== "") { root.searchNote = err; return }
-      var teams = root.isSdb ? Model.sdbTeams(payload) : Model.parseTeams(payload)
-      root.searchResults = teams
-      root.searchNote = teams.length === 0 ? "Nothing matched" : ""
-    } catch (e) {
-      root.searchNote = "Bad response"
+    var teams = []
+    if (text !== "") {
+      try { teams = Model.sdbTeams(JSON.parse(text)) } catch (e) { teams = [] }
     }
+    if (teams.length === 0) { runNextSearch(); return }
+    root.searching = false
+    root.searchResults = teams
+    root.searchNote = ""
   }
 
   Timer {
@@ -369,35 +339,16 @@ Panel {
     onTriggered: root.savedNote = ""
   }
 
-  // Same key handling as the fixture fetch: environment in, config file on
-  // stdin, nothing secret in argv.
   Process {
     id: searchProc
     running: false
-    command: ["bash", "-c", root.fetchScriptFor]
-    environment: ({
-      "NM_KEY": root.keySpec.mode === "inline" ? root.keySpec.value : "",
-      "NM_KEY_REF": root.keySpec.mode === "inline" ? "" : root.keySpec.value,
-      "NM_URL": root.isSdb
-        ? Model.sdbSearchUrl(root.keySpec.mode === "inline" ? root.keySpec.value : "", searchField.text)
-        : Model.teamsUrl(searchField.text),
-      "NM_CACHE": ""
-    })
+    command: ["bash", "-c", 'printf \'url = "%s"\\n\' "$NM_URL" | curl -fsS --max-time 20 -K -']
+    environment: ({ "NM_URL": root.searchUrl })
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.onSearched(text)
     }
   }
-
-  // The fixture script caches; the search must not overwrite that cache, so it
-  // reuses the same key handling with the caching step skipped.
-  readonly property string fetchScriptFor:
-    'key=$(' + Model.keyResolverScript(root.apiKeySpec) + ')\n' +
-    'key=$(printf %s "$key" | tr -d "[:space:]")\n' +
-    'if [ -z "$key" ]; then printf %s \'{"errors":{"token":"missing"}}\'; exit 0; fi\n' +
-    'printf \'header = "x-apisports-key: %s"\\nurl = "%s"\\n\' "$key" "$NM_URL" | curl -fsS --max-time 20 -K -\n'
-
-  onOpenedChanged: if (opened) syncFields()
 
   // -------------------------------------------------------------- panel plumbing
 
@@ -422,6 +373,8 @@ Panel {
     return false
   }
 
+  onOpenedChanged: if (opened) searchField.text = ""
+
   // ------------------------------------------------------------------- the popup
 
   readonly property color fg: root.bar ? root.bar.barForeground : Color.foreground
@@ -435,7 +388,7 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(320))
+    contentWidth: panel.fittedContentWidth(Style.space(360))
     contentHeight: panel.fittedContentHeight(body.implicitHeight)
 
     PanelKeyCatcher {
@@ -449,125 +402,20 @@ Panel {
         width: parent.width
         spacing: Style.space(10)
 
-        // ---- settings form. Shown automatically until the widget is usable,
-        // and on demand afterwards.
+        // ---- pick a team. Shown until the widget is usable, then on demand.
         Column {
           width: parent.width
           spacing: Style.space(6)
           visible: root.settingsOpen
 
           Text {
-            text: root.configured ? "Settings" : "Next Match needs setting up"
+            text: root.configured ? "Change team" : "Pick your team"
             color: root.fg
             font.family: root.fontFam
             font.pixelSize: Style.font.body
             font.bold: true
           }
 
-          Text {
-            text: "Data source"
-            color: Qt.darker(root.fg, 1.3)
-            font.family: root.fontFam
-            font.pixelSize: Style.font.bodySmall
-          }
-
-          Row {
-            spacing: Style.space(6)
-
-            Button {
-              text: "TheSportsDB (free)"
-              bordered: true
-              selected: root.isSdb
-              foreground: root.fg
-              fontFamily: root.fontFam
-              fontSize: Style.font.bodySmall
-              onClicked: if (!root.isSdb) {
-                // Team ids differ between sources, so switching clears the old
-                // one rather than silently looking up a stranger.
-                teamField.text = ""
-                root.searchResults = []
-                root.persistSettings({ provider: "thesportsdb", teamId: 0 })
-                root.syncFields()
-              }
-            }
-
-            Button {
-              text: "api-football"
-              bordered: true
-              selected: !root.isSdb
-              foreground: root.fg
-              fontFamily: root.fontFam
-              fontSize: Style.font.bodySmall
-              onClicked: if (root.isSdb) {
-                teamField.text = ""
-                root.searchResults = []
-                root.persistSettings({ provider: "api-football", teamId: 0, queryMode: "next" })
-                root.syncFields()
-              }
-            }
-          }
-
-          Text {
-            width: body.width
-            wrapMode: Text.WordWrap
-            textFormat: Text.PlainText
-            visible: !root.isSdb
-            text: "api-football's free plan cannot read the current season, so it cannot show an upcoming fixture. This source needs a paid key."
-            color: Qt.darker(root.fg, 1.7)
-            font.family: root.fontFam
-            font.pixelSize: Style.font.caption
-          }
-
-          Text {
-            text: root.isSdb ? "API key (optional)" : "API key"
-            color: Qt.darker(root.fg, 1.3)
-            font.family: root.fontFam
-            font.pixelSize: Style.font.bodySmall
-          }
-
-          TextField {
-            id: keyField
-            width: parent.width
-            // A pasted key is masked; a file:/env: reference is a path, not a
-            // secret, so it stays readable.
-            password: Model.keyIsSecret(text)
-            placeholderText: root.isSdb ? "optional — leave blank to use the free key" : "paste your api-football key"
-            foreground: root.fg
-            font.family: root.fontFam
-            font.pixelSize: Style.font.bodySmall
-            onAccepted: root.saveFields()
-          }
-
-          Text {
-            width: body.width
-            wrapMode: Text.WordWrap
-            textFormat: Text.PlainText
-            text: root.isSdb ? "TheSportsDB works without a key. Add your own only if you want your own rate limit." : "From dashboard.api-football.com. To keep it out of shell.json, enter file:~/.config/omarchy/next-match.key or env:API_FOOTBALL_KEY instead."
-            color: Qt.darker(root.fg, 1.7)
-            font.family: root.fontFam
-            font.pixelSize: Style.font.caption
-          }
-
-          Text {
-            text: "Team ID"
-            color: Qt.darker(root.fg, 1.3)
-            font.family: root.fontFam
-            font.pixelSize: Style.font.bodySmall
-          }
-
-          TextField {
-            id: teamField
-            width: parent.width
-            placeholderText: "e.g. 40"
-            validator: IntValidator { bottom: 0; top: 9999999 }
-            foreground: root.fg
-            font.family: root.fontFam
-            font.pixelSize: Style.font.bodySmall
-            onAccepted: root.saveFields()
-          }
-
-          // Nobody knows their team's numeric id, so it can be looked up here
-          // rather than in a terminal.
           Row {
             width: parent.width
             spacing: Style.space(6)
@@ -575,7 +423,7 @@ Panel {
             TextField {
               id: searchField
               width: parent.width - searchBtn.width - Style.space(6)
-              placeholderText: "or search by name, e.g. liverpool"
+              placeholderText: "club or league name"
               foreground: root.fg
               font.family: root.fontFam
               font.pixelSize: Style.font.bodySmall
@@ -617,7 +465,7 @@ Panel {
                 bordered: false
                 text: modelData.name
                       + (modelData.country ? "  ·  " + modelData.country : "")
-                      + "  ·  " + modelData.id
+                      + (modelData.code ? "  ·  " + modelData.code : "")
                 foreground: root.fg
                 fontFamily: root.fontFam
                 fontSize: Style.font.bodySmall
@@ -626,33 +474,20 @@ Panel {
             }
           }
 
-          Row {
-            spacing: Style.space(8)
-
-            Button {
-              text: "Save"
-              bordered: true
-              foreground: root.fg
-              fontFamily: root.fontFam
-              fontSize: Style.font.bodySmall
-              onClicked: root.saveFields()
-            }
-
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              visible: root.savedNote !== ""
-              text: root.savedNote
-              color: Qt.darker(root.fg, 1.4)
-              font.family: root.fontFam
-              font.pixelSize: Style.font.bodySmall
-            }
+          Text {
+            width: body.width
+            visible: root.savedNote !== ""
+            text: root.savedNote
+            color: Qt.darker(root.fg, 1.4)
+            font.family: root.fontFam
+            font.pixelSize: Style.font.bodySmall
           }
         }
 
         // ---- error
         Text {
           width: body.width
-          visible: !root.settingsOpen && root.configured && root.errorText !== ""
+          visible: !root.settingsOpen && root.errorText !== ""
           wrapMode: Text.WordWrap
           textFormat: Text.PlainText
           text: root.errorText
@@ -661,23 +496,10 @@ Panel {
           font.pixelSize: Style.font.bodySmall
         }
 
-        // ---- the API's own words, so a plan refusal is readable
-        Text {
-          width: body.width
-          visible: !root.settingsOpen && root.errorDetail !== ""
-          wrapMode: Text.WordWrap
-          textFormat: Text.PlainText
-          text: root.errorDetail
-                + (root.triedModes !== "" ? "\n\nTried: " + root.triedModes
-                   + "\nRun scripts/plan-probe to see what your plan allows." : "")
-          color: Qt.darker(root.fg, 1.4)
-          font.family: root.fontFam
-          font.pixelSize: Style.font.caption
-        }
-
         // ---- nothing scheduled
         Text {
-          visible: !root.settingsOpen && root.configured && root.errorText === "" && root.fixture === null && root.lastFetchMs > 0
+          visible: !root.settingsOpen && root.configured && root.errorText === ""
+                   && root.fixture === null && root.lastFetchMs > 0
           text: "No upcoming fixture"
           color: Qt.darker(root.fg, 1.4)
           font.family: root.fontFam
@@ -697,23 +519,60 @@ Panel {
             textFormat: Text.PlainText
             text: root.fixture && root.fixture.league
                   ? Model.plainText(root.fixture.league.name)
+                    + (root.fixture.league.round ? "  ·  " + Model.plainText(root.fixture.league.round) : "")
                   : ""
             color: Qt.darker(root.fg, 1.4)
             font.family: root.fontFam
             font.pixelSize: Style.font.bodySmall
           }
 
-          Text {
-            width: body.width
-            wrapMode: Text.WordWrap
-            textFormat: Text.PlainText
-            text: root.sidesNow
-                  ? Model.plainText(root.sidesNow.home.name) + "   v   " + Model.plainText(root.sidesNow.away.name)
-                  : ""
-            color: root.fg
-            font.family: root.fontFam
-            font.pixelSize: Style.font.body
-            font.bold: true
+          // Crests either side of the scoreline. Badges are remote PNGs;
+          // sourceSize caps the decode so a 500px crest is not held in memory
+          // at full size for a 28px slot.
+          Row {
+            width: parent.width
+            spacing: Style.space(8)
+
+            Image {
+              id: homeBadge
+              width: Style.space(28); height: Style.space(28)
+              anchors.verticalCenter: parent.verticalCenter
+              fillMode: Image.PreserveAspectFit
+              asynchronous: true
+              cache: true
+              sourceSize.width: Style.space(56)
+              sourceSize.height: Style.space(56)
+              visible: source != "" && status === Image.Ready
+              source: root.fixture && root.fixture.badges ? root.fixture.badges.home : ""
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              width: body.width - homeBadge.width - awayBadge.width - Style.space(24)
+              wrapMode: Text.WordWrap
+              horizontalAlignment: Text.AlignHCenter
+              textFormat: Text.PlainText
+              text: root.sidesNow
+                    ? Model.plainText(root.sidesNow.home.name) + "  v  " + Model.plainText(root.sidesNow.away.name)
+                    : ""
+              color: root.fg
+              font.family: root.fontFam
+              font.pixelSize: Style.font.body
+              font.bold: true
+            }
+
+            Image {
+              id: awayBadge
+              width: Style.space(28); height: Style.space(28)
+              anchors.verticalCenter: parent.verticalCenter
+              fillMode: Image.PreserveAspectFit
+              asynchronous: true
+              cache: true
+              sourceSize.width: Style.space(56)
+              sourceSize.height: Style.space(56)
+              visible: source != "" && status === Image.Ready
+              source: root.fixture && root.fixture.badges ? root.fixture.badges.away : ""
+            }
           }
 
           Text {
@@ -745,54 +604,129 @@ Panel {
               if (!root.fixture || !root.fixture.fixture) return ""
               var v = root.fixture.fixture.venue
               if (!v || !v.name) return ""
-              return Model.plainText(v.name) + (v.city ? ", " + Model.plainText(v.city) : "")
+              return Model.plainText(v.name) + (root.sidesNow ? (root.sidesNow.atHome ? "   ·   Home" : "   ·   Away") : "")
             }
             color: Qt.darker(root.fg, 1.4)
             font.family: root.fontFam
             font.pixelSize: Style.font.bodySmall
           }
+        }
+
+        // ---- the three fixtures after this one. TheSportsDB only publishes a
+        // few rounds ahead early in a season, so this fills in over time
+        // rather than always holding three.
+        Column {
+          width: parent.width
+          spacing: Style.space(4)
+          visible: !root.settingsOpen && root.fixture !== null && root.errorText === ""
+
+          PanelSeparator { width: parent.width }
+
+          Text {
+            text: "Then"
+            color: Qt.darker(root.fg, 1.5)
+            font.family: root.fontFam
+            font.pixelSize: Style.font.caption
+          }
+
+          Repeater {
+            model: root.laterFixtures
+
+            Row {
+              required property var modelData
+              width: body.width
+              spacing: Style.space(6)
+
+              readonly property var rowSides: Model.sides(modelData, root.teamId)
+              readonly property string rowOpponent: rowSides ? Model.plainText(rowSides.them.name) : ""
+              readonly property string rowBadge: Model.opponentBadge(modelData, root.teamId)
+
+              Image {
+                anchors.verticalCenter: parent.verticalCenter
+                width: status === Image.Ready ? Style.space(16) : 0
+                height: width
+                fillMode: Image.PreserveAspectFit
+                asynchronous: true
+                cache: true
+                visible: status === Image.Ready
+                sourceSize.width: Style.space(32)
+                sourceSize.height: Style.space(32)
+                source: parent.rowBadge
+              }
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                width: body.width - Style.space(150)
+                elide: Text.ElideRight
+                textFormat: Text.PlainText
+                text: (parent.rowSides && parent.rowSides.atHome ? "vs " : "at ") + parent.rowOpponent
+                color: root.fg
+                font.family: root.fontFam
+                font.pixelSize: Style.font.bodySmall
+              }
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                horizontalAlignment: Text.AlignRight
+                textFormat: Text.PlainText
+                text: {
+                  var ko = Model.kickoffMs(parent.modelData)
+                  if (!isFinite(ko)) return ""
+                  return Qt.formatDateTime(new Date(ko), "ddd d MMM  HH:mm")
+                }
+                color: Qt.darker(root.fg, 1.4)
+                font.family: root.fontFam
+                font.pixelSize: Style.font.bodySmall
+              }
+            }
+          }
 
           Text {
             width: body.width
-            visible: root.sidesNow !== null
+            visible: root.laterFixtures.length === 0
+            wrapMode: Text.WordWrap
             textFormat: Text.PlainText
-            text: root.sidesNow ? (root.sidesNow.atHome ? "Home" : "Away") : ""
-            color: Qt.darker(root.fg, 1.4)
+            text: "Nothing further published yet."
+            color: Qt.darker(root.fg, 1.6)
             font.family: root.fontFam
-            font.pixelSize: Style.font.bodySmall
+            font.pixelSize: Style.font.caption
+            font.italic: true
           }
         }
 
         PanelSeparator { width: parent.width }
 
-        Button {
-          visible: root.configured
-          text: root.showSettings ? "Done" : "Settings"
-          bordered: false
-          foreground: Qt.darker(root.fg, 1.4)
-          fontFamily: root.fontFam
-          fontSize: Style.font.bodySmall
-          onClicked: {
-            root.showSettings = !root.showSettings
-            if (root.showSettings) root.syncFields()
-            else root.searchResults = []
-          }
-        }
+        Row {
+          spacing: Style.space(10)
 
-        Text {
-          width: body.width
-          visible: !root.settingsOpen
-          textFormat: Text.PlainText
-          text: {
-            if (root.fetching) return "Refreshing…"
-            if (root.lastFetchMs === 0) return "Middle-click the pill to refresh"
-            var mins = Math.floor((root.nowMs - root.lastFetchMs) / 60000)
-            var ago = mins < 1 ? "just now" : (mins < 60 ? mins + "m ago" : Math.floor(mins / 60) + "h ago")
-            return "Updated " + ago + "   ·   middle-click to refresh"
+          Button {
+            visible: root.configured
+            text: root.showSettings ? "Done" : "Change team"
+            bordered: false
+            foreground: Qt.darker(root.fg, 1.4)
+            fontFamily: root.fontFam
+            fontSize: Style.font.bodySmall
+            onClicked: {
+              root.showSettings = !root.showSettings
+              if (!root.showSettings) { root.searchResults = []; root.searchNote = "" }
+            }
           }
-          color: Qt.darker(root.fg, 1.6)
-          font.family: root.fontFam
-          font.pixelSize: Style.font.bodySmall
+
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            visible: !root.settingsOpen
+            textFormat: Text.PlainText
+            text: {
+              if (root.fetching) return "Refreshing…"
+              if (root.lastFetchMs === 0) return "middle-click to refresh"
+              var mins = Math.floor((root.nowMs - root.lastFetchMs) / 60000)
+              var ago = mins < 1 ? "just now" : (mins < 60 ? mins + "m ago" : Math.floor(mins / 60) + "h ago")
+              return "Updated " + ago
+            }
+            color: Qt.darker(root.fg, 1.6)
+            font.family: root.fontFam
+            font.pixelSize: Style.font.caption
+          }
         }
       }
     }
