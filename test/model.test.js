@@ -168,5 +168,19 @@ console.log("pickNextFixture")
   eq(M.kickoffMs(M.pickNextFixture({ response: [soon] }, NOW)), M.kickoffMs(soon), "single result from next=1")
 }
 
+// ---- real refusals observed from a Free account
+console.log("\nplan refusal classification (verbatim API messages)")
+const NEXT_ERR   = { errors: { plan: "Free plans do not have access to the Next parameter." } }
+const LAST_ERR   = { errors: { plan: "Free plans do not have access to the Last parameter." } }
+const SEASON_ERR = { errors: { plan: "Free plans do not have access to this season, try from 2022 to 2024." } }
+const NOSEASON   = { errors: { season: "The Season field is required." } }
+eq(M.planRefusal(NEXT_ERR), "parameter", "next parameter -> try another shape")
+eq(M.planRefusal(LAST_ERR), "parameter", "last parameter -> try another shape")
+eq(M.planRefusal(SEASON_ERR), "season", "season lockout -> terminal, stop cycling")
+eq(M.planRefusal(NOSEASON), "", "a missing field is our bug, not a plan limit")
+eq(M.planRefusal({ errors: { token: "Missing application key" } }), "", "key problem is not a plan problem")
+eq(M.seasonHint(SEASON_ERR), "2022-2024", "the years the key can actually see")
+eq(M.seasonHint(NEXT_ERR), "", "no hint when none offered")
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

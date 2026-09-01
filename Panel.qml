@@ -45,7 +45,16 @@ Panel {
 
   property var fixture: null
   property string errorText: ""
+  // The API's verbatim refusal, shown in the panel so a plan problem is
+  // readable rather than guessed at.
+  property string errorDetail: ""
+  property string triedModes: ""
   property double lastFetchMs: 0
+  // Guards against the same query going out twice in a burst: a startup fetch
+  // and a fallback retry can otherwise land on the same URL a second apart and
+  // spend two of the day's requests to learn one thing.
+  property string lastUrl: ""
+  property double lastUrlAt: 0
   property bool fetching: false
   property string quotaText: ""
 
@@ -98,7 +107,11 @@ Panel {
     // budget: ignore anything that comes back inside a minute unless a human
     // asked for it.
     if (!force && root.lastFetchMs > 0 && Date.now() - root.lastFetchMs < 60000) return
-    root.fetchUrl = Model.fixtureUrl(root.teamId, root.queryMode, Date.now())
+    var url = Model.fixtureUrl(root.teamId, root.queryMode, Date.now())
+    if (url === root.lastUrl && Date.now() - root.lastUrlAt < 5000) return
+    root.lastUrl = url
+    root.lastUrlAt = Date.now()
+    root.fetchUrl = url
     root.fetching = true
     fetchProc.running = true
   }
@@ -106,14 +119,33 @@ Panel {
   function applyPayload(payload, fromCache) {
     // The free plan refuses `next`. That is not a user error: try the next
     // query shape, remember it, and say nothing.
-    if (!fromCache && Model.isPlanRefusal(payload)) {
+    var refusal = fromCache ? "" : Model.planRefusal(payload)
+    if (refusal !== "") {
+      root.errorDetail = Model.rawApiError(payload)
+      console.log("next-match: '" + root.queryMode + "' refused (" + refusal + ") — " + root.errorDetail)
+
+      // A season the account cannot see is the end of the road: every query
+      // shape asks about the same season, so there is nothing left to try.
+      if (refusal === "season") {
+        var hint = Model.seasonHint(payload)
+        root.errorText = "Plan has no current season"
+        if (hint !== "") root.errorDetail += "\n\nThis key can only read " + hint
+          + ", so there is no upcoming fixture for it to return."
+        // Nothing will change until the account does. Check twice a day rather
+        // than hourly, so an unusable key costs 2 requests a day, not 48.
+        refreshTimer.interval = 12 * 3600 * 1000
+        refreshTimer.restart()
+        return
+      }
+
+      root.triedModes = (root.triedModes ? root.triedModes + ", " : "") + root.queryMode
       var fallback = Model.nextQueryMode(root.queryMode)
       if (fallback !== "") {
         persistSettings({ queryMode: fallback })
         Qt.callLater(function() { root.refresh(true) })
         return
       }
-      root.errorText = "Your plan cannot read fixtures"
+      root.errorText = "Plan cannot read fixtures"
       return
     }
 
@@ -125,6 +157,8 @@ Panel {
       return
     }
     root.errorText = ""
+    root.errorDetail = ""
+    root.triedModes = ""
     root.fixture = Model.pickNextFixture(payload, Date.now())
     if (!fromCache) root.lastFetchMs = Date.now()
     if (payload && payload.paging !== undefined && payload.results !== undefined)
@@ -557,6 +591,20 @@ Panel {
           color: root.bar ? root.bar.urgent : Color.urgent
           font.family: root.fontFam
           font.pixelSize: Style.font.bodySmall
+        }
+
+        // ---- the API's own words, so a plan refusal is readable
+        Text {
+          width: body.width
+          visible: !root.settingsOpen && root.errorDetail !== ""
+          wrapMode: Text.WordWrap
+          textFormat: Text.PlainText
+          text: root.errorDetail
+                + (root.triedModes !== "" ? "\n\nTried: " + root.triedModes
+                   + "\nRun scripts/plan-probe to see what your plan allows." : "")
+          color: Qt.darker(root.fg, 1.4)
+          font.family: root.fontFam
+          font.pixelSize: Style.font.caption
         }
 
         // ---- nothing scheduled

@@ -23,6 +23,18 @@ function apiError(payload) {
   return String(e[keys[0]])
 }
 
+// The API's own words, kept verbatim for the panel. A short label belongs in
+// the bar; the reason the request was refused belongs where it can be read and
+// acted on, rather than being flattened into one of our own sentences.
+function rawApiError(payload) {
+  if (!payload || typeof payload !== "object") return ""
+  var e = payload.errors
+  if (!e || Array.isArray(e)) return ""
+  var parts = []
+  for (var k in e) parts.push(k + ": " + String(e[k]))
+  return parts.join("  ")
+}
+
 function firstFixture(payload) {
   if (!payload || !Array.isArray(payload.response) || payload.response.length === 0) return null
   return payload.response[0]
@@ -240,15 +252,32 @@ function fixtureUrl(teamId, mode, nowMs, windowDays) {
   return base + "&next=1"
 }
 
-// True when the API refused the query itself rather than the key, which is the
-// signal to try the next mode instead of showing the user an error.
+// Why the API refused, which decides whether trying another query shape can
+// possibly help:
+//   "parameter" — this query shape is not allowed, but another might be.
+//   "season"    — the account cannot see the current season at all. No query
+//                 shape has an upcoming fixture to return, so stop: cycling
+//                 modes would only spend the daily allowance to be refused
+//                 three times instead of once.
+//   "plan"      — some other plan restriction.
+function planRefusal(payload) {
+  var raw = rawApiError(payload)
+  if (!raw) return ""
+  if (/access to this season/i.test(raw)) return "season"
+  if (/access to the \s*\w+\s*parameter/i.test(raw)) return "parameter"
+  if (/plan|subscription|upgrade|not allowed/i.test(raw)) return "plan"
+  return ""
+}
+
 function isPlanRefusal(payload) {
-  if (!payload || typeof payload !== "object") return false
-  var e = payload.errors
-  if (!e || Array.isArray(e)) return false
-  var text = ""
-  for (var k in e) text += " " + k + " " + String(e[k])
-  return /plan|subscription|upgrade|not allowed|access|parameter/i.test(text)
+  return planRefusal(payload) !== ""
+}
+
+// "…try from 2022 to 2024." -> "2022-2024", for a message that says what the
+// account can actually see instead of only what it cannot.
+function seasonHint(payload) {
+  var m = /try from (\d{4}) to (\d{4})/i.exec(rawApiError(payload))
+  return m ? m[1] + "-" + m[2] : ""
 }
 
 // From any of the query shapes, the fixture that is on now or soonest next.
@@ -322,6 +351,7 @@ function validTeamId(value) {
 if (typeof module !== "undefined") {
   module.exports = {
     apiError: apiError,
+    rawApiError: rawApiError,
     firstFixture: firstFixture,
     statusShort: statusShort,
     matchState: matchState,
@@ -339,6 +369,8 @@ if (typeof module !== "undefined") {
     seasonFor: seasonFor,
     fixtureUrl: fixtureUrl,
     isPlanRefusal: isPlanRefusal,
+    planRefusal: planRefusal,
+    seasonHint: seasonHint,
     pickNextFixture: pickNextFixture,
     searchValid: searchValid,
     teamsUrl: teamsUrl,
