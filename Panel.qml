@@ -43,8 +43,8 @@ Panel {
   // --------------------------------------------------------------------- state
 
   // The scheduled fixture, and — while one is being played — the live feed's
-  // version of it. Display reads `displayFixture`; pacing and the "then" list
-  // read `fixture`, which is the schedule.
+  // version of it. Display reads `displayFixture`; pacing reads `fixture`,
+  // which is the schedule.
   property var fixture: null
   property var liveFixture: null
   readonly property var displayFixture: root.liveFixture ? root.liveFixture : root.fixture

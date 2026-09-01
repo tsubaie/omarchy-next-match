@@ -1,7 +1,6 @@
-// Pure logic for the Next Match widget: no QML types, no I/O, no Date.now().
-// Every function that depends on "now" takes it as a parameter, so the same
-// input always renders the same output and the whole file is testable under
-// Node (see test/model.test.js).
+// Logic for the Next Match widget: no QML types and no I/O. Display and pacing
+// functions take "now" as a parameter, keeping those decisions deterministic
+// and the file testable under Node (see test/model.test.js).
 
 // -------------------------------------------------------------- thesportsdb
 
@@ -546,9 +545,8 @@ function rowWhen(parts) {
 
 // ---------------------------------------------------------------- refresh pacing
 
-// The free plan allows 100 requests a day, reset at 00:00 UTC, so polling is
-// paced by how soon the answer can change rather than by a fixed interval.
-// Worst case (a match day with live polling on) lands near 55 requests.
+// Polling is paced by how soon the answer can change rather than by a fixed
+// interval. The separate live-feed timer runs every three minutes.
 function refreshMinutes(fx, nowMs, baseMinutes, showLive) {
   var base = parseInt(baseMinutes, 10)
   if (!isFinite(base) || base < 15) base = 60

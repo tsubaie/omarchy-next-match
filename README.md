@@ -23,9 +23,9 @@ setup — no key, no account, nothing to paste.
 per request, so one country-wide call is not enough: for Saudi Arabia it stops
 at Al-Bukiryah, offering "Al Hilal Women" but not Al-Hilal. The list is
 gathered from that country's competitions instead — ten each rather than ten in
-total — which comes to about twenty clubs, the ones anyone is actually looking
-for among them. Every row shows its competition, so a club and its women's side
-are told apart.
+total. The widget checks up to eight competitions and merges their clubs with
+the country-wide results. Every row shows its competition, so a club and its
+women's side are told apart.
 
 If a club is still missing, type three letters and the widget searches by name
 and folds the result in. Matching ignores punctuation, case and accents in
@@ -86,18 +86,17 @@ by how soon the answer could actually change:
 
 | Situation | Interval |
 |-----------|----------|
-| Next match more than a day away | 6 hours |
-| Same day | 1 hour |
+| Next match more than 24 hours away | 6 hours, or a longer configured fallback |
+| Between 1 and 24 hours away | 1 hour |
 | Within an hour of kick-off | 15 minutes |
 | From 10 minutes before kick-off until the match ends | 3 minutes, against the live feed |
+| Kick-off passed, while waiting for the schedule to change | 5 minutes |
 
-A worst-case match day — a full day of polling, an hour of tightening, and a
-whole match streamed live — is about **50 requests**.
-
-The last response is cached to `~/.cache/omarchy-next-match/fixture.json`, so
-restarting the shell shows the fixture immediately instead of spending a
-request, and a refresh that arrives within a minute of the last one is ignored
-to survive reload storms.
+The last structurally valid response for each team is cached to
+`~/.cache/omarchy-next-match/fixture-<teamId>.json`, so restarting the shell
+shows the right fixture immediately. Invalid and rate-limited responses do not
+replace that cache. A refresh that arrives within a minute of the last one is
+ignored to survive reload storms.
 
 ## Settings
 
@@ -111,15 +110,14 @@ omarchy bar set tsubaie.next-match showBadge false --json
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `teamId` | `0` | TheSportsDB team id. Set by the search, not by hand. |
-| `showBadge` | `true` | Crests in the bar. Off falls back to the icon. |
+| `showBadge` | `true` | Show both crests; off keeps the names and fixture text without them |
 | `showLive` | `true` | Turn the pill into a live scoreline during the match |
-| `refreshMinutes` | `60` | Floor for the poll interval when nothing is close |
+| `refreshMinutes` | `60` | Fallback interval; matches over a day away poll no faster than every 6 hours |
 | `icon` | `⚽` | Shown when there is no fixture to draw |
 | `hideWhenIdle` | `false` | Take no space at all when nothing is scheduled |
 
 There is no key field, because the widget works without one. If you want your
-own TheSportsDB key — it lifts the shared key's one-fixture limit to ten, which
-is what fills the "Then" list, and avoids its rate limiting — set it with
+own TheSportsDB key to avoid the shared key's rate limiting, set it with
 `omarchy bar set tsubaie.next-match apiKey <key>`.
 
 ## Development
@@ -129,10 +127,10 @@ node test/model.test.js          # pure logic, no network, no QML
 omarchy plugin validate .        # manifest against the shell's own schema
 ```
 
-`Model.js` holds every decision worth testing — label shape, match state,
-countdowns, poll pacing, key parsing — and takes "now" as a parameter, so the
-tests are deterministic. `Panel.qml` owns fetching and state; `BarWidget.qml`
-owns only the button.
+`Model.js` holds the display and selection decisions worth testing — label
+shape, match state, countdowns, poll pacing and key parsing. Time-sensitive
+display functions take "now" as a parameter, so their tests are deterministic.
+`Panel.qml` owns fetching and state; `BarWidget.qml` owns only the button.
 
 ## Licence
 

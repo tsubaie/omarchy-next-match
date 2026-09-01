@@ -33,14 +33,14 @@
         "max": 99999999,
         "step": 1,
         "defaultValue": 0,
-        "description": "TheSportsDB's numeric team id. You should not have to type this: click the widget and search for your club by name, or by league name to browse it."
+        "description": "TheSportsDB's numeric team id. You should not have to type this: click the widget, choose a country, then choose or search for your club."
       },
       {
         "key": "showBadge",
         "type": "boolean",
         "label": "Show the club crest",
         "defaultValue": true,
-        "description": "Puts the opponent's crest in the bar in place of the icon. Off falls back to the icon, as it does anyway while a crest is still loading or missing."
+        "description": "Shows both clubs' crests in the bar. Off leaves the club names and score or fixture time without crests."
       },
       {
         "key": "showLive",
@@ -57,7 +57,7 @@
         "max": 720,
         "step": 15,
         "defaultValue": 60,
-        "description": "Minutes between checks when the next match is more than a day away. Only a floor: the widget already slows to 6 hours when nothing is close and tightens to 5 minutes during a match."
+        "description": "Fallback minutes between fixture checks. Matches over a day away poll no faster than every 6 hours; checks tighten near kick-off, while the separate live feed polls every 3 minutes."
       },
       {
         "key": "icon",
