@@ -40,6 +40,115 @@ function firstFixture(payload) {
   return payload.response[0]
 }
 
+// -------------------------------------------------------------- thesportsdb
+
+// A second provider, because api-football's free plan cannot read the current
+// season and so cannot answer this widget's only question. TheSportsDB answers
+// it for free, including leagues api-football's free tier locks away.
+//
+// Events are adapted into the api-football shape rather than the display code
+// being taught two vocabularies: everything downstream stays provider-blind.
+
+var SDB_BASE = "https://www.thesportsdb.com/api/v1/json/"
+
+function sdbUrl(key, path) {
+  return SDB_BASE + (String(key || "").trim() || "3") + "/" + path
+}
+
+function sdbNextUrl(key, teamId) { return sdbUrl(key, "eventsnext.php?id=" + teamId) }
+function sdbSearchUrl(key, query) {
+  return sdbUrl(key, "searchteams.php?t=" + encodeURIComponent(String(query || "").trim()))
+}
+
+// strTimestamp has no zone marker but is UTC — strTime is 18:00:00 where
+// strTimeLocal is 21:00:00 for a Saudi kick-off. Parsing it as local time
+// would move every fixture by the viewer's offset.
+function sdbKickoffMs(ev) {
+  if (!ev) return NaN
+  var stamp = String(ev.strTimestamp || "").trim()
+  if (stamp) {
+    var iso = /(Z|[+-]\d{2}:?\d{2})$/.test(stamp) ? stamp : stamp + "Z"
+    var t = Date.parse(iso)
+    if (!isNaN(t)) return t
+  }
+  var d = String(ev.dateEvent || "").trim()
+  var tm = String(ev.strTime || "00:00:00").trim()
+  if (!d) return NaN
+  var t2 = Date.parse(d + "T" + tm + "Z")
+  return isNaN(t2) ? NaN : t2
+}
+
+function sdbStatus(ev) {
+  if (!ev) return "NS"
+  if (String(ev.strPostponed || "").toLowerCase() === "yes") return "PST"
+  var raw = String(ev.strStatus || "").trim()
+  if (!raw || raw === "-") return "NS"
+  var up = raw.toUpperCase()
+  // TheSportsDB mostly speaks the same short codes; spell out the long forms.
+  if (/MATCH FINISHED|FINISHED|FULL ?TIME/.test(up)) return "FT"
+  if (/HALF ?TIME/.test(up)) return "HT"
+  if (/NOT ?STARTED/.test(up)) return "NS"
+  return up
+}
+
+function sdbInt(value) {
+  var n = parseInt(String(value === null || value === undefined ? "" : value), 10)
+  return isFinite(n) ? n : null
+}
+
+// TheSportsDB event -> the fixture shape the rest of this file already speaks.
+function sdbToFixture(ev) {
+  if (!ev) return null
+  var ko = sdbKickoffMs(ev)
+  if (!isFinite(ko)) return null
+  return {
+    fixture: {
+      timestamp: Math.round(ko / 1000),
+      status: { short: sdbStatus(ev), elapsed: sdbInt(ev.strProgress) },
+      venue: { name: String(ev.strVenue || ""), city: "" }
+    },
+    teams: {
+      home: { id: sdbInt(ev.idHomeTeam), name: String(ev.strHomeTeam || "") },
+      away: { id: sdbInt(ev.idAwayTeam), name: String(ev.strAwayTeam || "") }
+    },
+    goals: { home: sdbInt(ev.intHomeScore), away: sdbInt(ev.intAwayScore) },
+    league: {
+      name: String(ev.strLeague || ""),
+      round: ev.intRound ? "Round " + ev.intRound : ""
+    }
+  }
+}
+
+// TheSportsDB answers with `events: null` rather than an empty list when a team
+// has nothing scheduled, which JSON.parse turns into null, not [].
+function sdbFixtures(payload) {
+  if (!payload) return []
+  var events = payload.events || payload.results
+  if (!Array.isArray(events)) return []
+  var out = []
+  for (var i = 0; i < events.length; ++i) {
+    var fx = sdbToFixture(events[i])
+    if (fx) out.push(fx)
+  }
+  return { response: out }
+}
+
+function sdbTeams(payload) {
+  var teams = payload && Array.isArray(payload.teams) ? payload.teams : []
+  var out = []
+  for (var i = 0; i < teams.length; ++i) {
+    var t = teams[i]
+    if (!t || !t.idTeam) continue
+    out.push({
+      id: sdbInt(t.idTeam),
+      name: String(t.strTeam || ""),
+      country: String(t.strCountry || ""),
+      code: String(t.strLeague || "")
+    })
+  }
+  return out
+}
+
 // ------------------------------------------------------------------ match state
 
 var LIVE_STATUS = ["1H", "2H", "HT", "ET", "BT", "P", "LIVE", "INT", "SUSP"]
@@ -350,6 +459,14 @@ function validTeamId(value) {
 
 if (typeof module !== "undefined") {
   module.exports = {
+    sdbUrl: sdbUrl,
+    sdbNextUrl: sdbNextUrl,
+    sdbSearchUrl: sdbSearchUrl,
+    sdbKickoffMs: sdbKickoffMs,
+    sdbStatus: sdbStatus,
+    sdbToFixture: sdbToFixture,
+    sdbFixtures: sdbFixtures,
+    sdbTeams: sdbTeams,
     apiError: apiError,
     rawApiError: rawApiError,
     firstFixture: firstFixture,

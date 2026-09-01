@@ -182,5 +182,55 @@ eq(M.planRefusal({ errors: { token: "Missing application key" } }), "", "key pro
 eq(M.seasonHint(SEASON_ERR), "2022-2024", "the years the key can actually see")
 eq(M.seasonHint(NEXT_ERR), "", "no hint when none offered")
 
+// ---- TheSportsDB adapter, against a real captured payload
+console.log("\nthesportsdb adapter")
+const SDB_EVENT = {
+  idEvent: "2573336", strEvent: "Al-Hilal vs Al-Ahli",
+  strLeague: "Saudi-Arabian Pro League", idLeague: "4668", intRound: "3",
+  strHomeTeam: "Al-Hilal", strAwayTeam: "Al-Ahli",
+  idHomeTeam: "136013", idAwayTeam: "137721",
+  intHomeScore: null, intAwayScore: null,
+  strStatus: "NS", strProgress: null, strPostponed: "no",
+  dateEvent: "2026-09-01", strTime: "18:00:00",
+  strTimeLocal: "21:00:00", strTimestamp: "2026-09-01T18:00:00",
+  strVenue: "Kingdom Arena"
+}
+
+// The zone bug that would silently move every kick-off: strTimestamp carries no
+// marker but is UTC (strTimeLocal is +3 for this fixture).
+eq(M.sdbKickoffMs(SDB_EVENT), Date.parse("2026-09-01T18:00:00Z"), "timestamp read as UTC, not local")
+eq(M.sdbKickoffMs({ dateEvent: "2026-09-01", strTime: "18:00:00" }), Date.parse("2026-09-01T18:00:00Z"), "falls back to date + time")
+eq(M.sdbKickoffMs({}), NaN, "no date -> NaN")
+eq(M.sdbKickoffMs({ strTimestamp: "2026-09-01T18:00:00Z" }), Date.parse("2026-09-01T18:00:00Z"), "an explicit Z is not doubled")
+
+eq(M.sdbStatus(SDB_EVENT), "NS", "not started")
+eq(M.sdbStatus({ strStatus: "Match Finished" }), "FT", "long form finished")
+eq(M.sdbStatus({ strStatus: "Half Time" }), "HT", "long form half time")
+eq(M.sdbStatus({ strStatus: "" }), "NS", "blank means not started")
+eq(M.sdbStatus({ strStatus: "-" }), "NS", "placeholder means not started")
+eq(M.sdbStatus({ strPostponed: "yes", strStatus: "NS" }), "PST", "postponed wins")
+
+{
+  const fx = M.sdbToFixture(SDB_EVENT)
+  eq(fx.teams.home.name, "Al-Hilal", "home team")
+  eq(fx.teams.home.id, 136013, "ids become numbers so they compare with the setting")
+  eq(fx.goals.home, null, "no score yet")
+  eq(fx.league.round, "Round 3", "round labelled")
+  eq(M.matchState(fx), "scheduled", "state via the shared vocabulary")
+  eq(M.pillLabel(fx, Date.parse("2026-09-01T12:00:00Z"),
+     { teamId: 136013, when: { weekday: "Tue", time: "21:00" } }),
+     "vs Al-Ahli  in 6h", "renders through the same pill logic as api-football")
+}
+
+// events: null is what TheSportsDB sends for "nothing scheduled"
+eq(M.sdbFixtures({ events: null }), [], "null events -> empty, not a crash")
+eq(M.sdbFixtures(null), [], "no payload -> empty")
+eq(M.sdbFixtures({ events: [SDB_EVENT] }).response.length, 1, "wrapped in the api-football envelope")
+eq(M.sdbTeams({ teams: [{ idTeam: "136013", strTeam: "Al-Hilal", strCountry: "Saudi Arabia", strLeague: "Pro League" }] }),
+   [{ id: 136013, name: "Al-Hilal", country: "Saudi Arabia", code: "Pro League" }], "team search rows")
+eq(M.sdbTeams({ teams: null }), [], "no teams")
+eq(M.sdbNextUrl("", 136013), "https://www.thesportsdb.com/api/v1/json/3/eventsnext.php?id=136013", "blank key uses the free test key")
+eq(M.sdbNextUrl("mykey", 136013), "https://www.thesportsdb.com/api/v1/json/mykey/eventsnext.php?id=136013", "own key honoured")
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

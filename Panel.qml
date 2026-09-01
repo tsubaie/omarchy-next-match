@@ -24,6 +24,12 @@ Panel {
 
   // ------------------------------------------------------------------ settings
 
+  // "thesportsdb" (default: free, no key needed, covers leagues api-football's
+  // free tier locks away) or "api-football" (needs a paid key for the current
+  // season).
+  readonly property string provider: String(root.setting("provider", "thesportsdb"))
+  readonly property bool isSdb: provider !== "api-football"
+
   readonly property string apiKeySpec: String(root.setting("apiKey", ""))
   readonly property var keySpec: Model.parseKeySpec(apiKeySpec)
   readonly property int teamId: Model.validTeamId(root.setting("teamId", 0))
@@ -39,7 +45,9 @@ Panel {
   readonly property string queryMode: String(root.setting("queryMode", "next"))
 
   readonly property bool hasKey: keySpec.mode !== "none"
-  readonly property bool configured: hasKey && teamId > 0
+  // TheSportsDB works on its shared test key, so a team id is the only thing
+  // it actually needs from the user.
+  readonly property bool configured: (isSdb || hasKey) && teamId > 0
 
   // --------------------------------------------------------------------- state
 
@@ -79,7 +87,8 @@ Panel {
   }
 
   readonly property string pillLabel: {
-    if (!hasKey) return "Add API key"
+    // TheSportsDB needs no key of the user's own, so only api-football may ask.
+    if (!isSdb && !hasKey) return "Add API key"
     if (teamId <= 0) return "Set team ID"
     if (errorText !== "") return errorText
     if (fixture === null) return lastFetchMs === 0 ? "…" : "No match"
@@ -107,7 +116,9 @@ Panel {
     // budget: ignore anything that comes back inside a minute unless a human
     // asked for it.
     if (!force && root.lastFetchMs > 0 && Date.now() - root.lastFetchMs < 60000) return
-    var url = Model.fixtureUrl(root.teamId, root.queryMode, Date.now())
+    var url = root.isSdb
+      ? Model.sdbNextUrl(root.keySpec.mode === "inline" ? root.keySpec.value : "", root.teamId)
+      : Model.fixtureUrl(root.teamId, root.queryMode, Date.now())
     if (url === root.lastUrl && Date.now() - root.lastUrlAt < 5000) return
     root.lastUrl = url
     root.lastUrlAt = Date.now()
@@ -177,7 +188,8 @@ Panel {
       return
     }
     try {
-      applyPayload(JSON.parse(text), false)
+      var parsed = JSON.parse(text)
+      applyPayload(root.isSdb ? Model.sdbFixtures(parsed) : parsed, false)
     } catch (e) {
       root.errorText = "Bad response"
       scheduleNext()
@@ -189,8 +201,8 @@ Panel {
     var raw = String(text || "").trim()
     if (raw === "") return
     try {
-      var payload = JSON.parse(raw)
-      applyPayload(payload, true)
+      var parsedCache = JSON.parse(raw)
+      applyPayload(root.isSdb ? Model.sdbFixtures(parsedCache) : parsedCache, true)
       // Cached data is shown immediately but is not proof of a recent fetch;
       // refresh() decides on its own whether the network is due.
     } catch (e) {
@@ -267,7 +279,7 @@ Panel {
   readonly property string fetchScript:
     'key=$(' + Model.keyResolverScript(root.apiKeySpec) + ')\n' +
     'key=$(printf %s "$key" | tr -d "[:space:]")\n' +
-    'if [ -z "$key" ]; then printf %s \'{"errors":{"token":"missing"}}\'; exit 0; fi\n' +
+    (root.isSdb ? '' : 'if [ -z "$key" ]; then printf %s \'{"errors":{"token":"missing"}}\'; exit 0; fi\n') +
     'out=$(printf \'header = "x-apisports-key: %s"\\nurl = "%s"\\n\' "$key" "$NM_URL" | curl -fsS --max-time 20 -K -) || out=""\n' +
     'if [ -n "$out" ]; then mkdir -p "$(dirname "$NM_CACHE")" && printf %s "$out" > "$NM_CACHE".tmp && mv -f "$NM_CACHE".tmp "$NM_CACHE"; fi\n' +
     'printf %s "$out"\n'
@@ -327,7 +339,7 @@ Panel {
   function searchTeams() {
     var q = String(searchField.text).trim()
     if (!Model.searchValid(q)) { root.searchNote = "Type at least 3 characters"; return }
-    if (!hasKey) { root.searchNote = "Add your API key first"; return }
+    if (!isSdb && !hasKey) { root.searchNote = "Add your API key first"; return }
     if (searchProc.running) return
     root.searchResults = []
     root.searchNote = "Searching…"
@@ -343,7 +355,7 @@ Panel {
       var payload = JSON.parse(text)
       var err = Model.apiError(payload)
       if (err !== "") { root.searchNote = err; return }
-      var teams = Model.parseTeams(payload)
+      var teams = root.isSdb ? Model.sdbTeams(payload) : Model.parseTeams(payload)
       root.searchResults = teams
       root.searchNote = teams.length === 0 ? "Nothing matched" : ""
     } catch (e) {
@@ -366,7 +378,9 @@ Panel {
     environment: ({
       "NM_KEY": root.keySpec.mode === "inline" ? root.keySpec.value : "",
       "NM_KEY_REF": root.keySpec.mode === "inline" ? "" : root.keySpec.value,
-      "NM_URL": Model.teamsUrl(searchField.text),
+      "NM_URL": root.isSdb
+        ? Model.sdbSearchUrl(root.keySpec.mode === "inline" ? root.keySpec.value : "", searchField.text)
+        : Model.teamsUrl(searchField.text),
       "NM_CACHE": ""
     })
     stdout: StdioCollector {
@@ -451,7 +465,61 @@ Panel {
           }
 
           Text {
-            text: "API key"
+            text: "Data source"
+            color: Qt.darker(root.fg, 1.3)
+            font.family: root.fontFam
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          Row {
+            spacing: Style.space(6)
+
+            Button {
+              text: "TheSportsDB (free)"
+              bordered: true
+              selected: root.isSdb
+              foreground: root.fg
+              fontFamily: root.fontFam
+              fontSize: Style.font.bodySmall
+              onClicked: if (!root.isSdb) {
+                // Team ids differ between sources, so switching clears the old
+                // one rather than silently looking up a stranger.
+                teamField.text = ""
+                root.searchResults = []
+                root.persistSettings({ provider: "thesportsdb", teamId: 0 })
+                root.syncFields()
+              }
+            }
+
+            Button {
+              text: "api-football"
+              bordered: true
+              selected: !root.isSdb
+              foreground: root.fg
+              fontFamily: root.fontFam
+              fontSize: Style.font.bodySmall
+              onClicked: if (root.isSdb) {
+                teamField.text = ""
+                root.searchResults = []
+                root.persistSettings({ provider: "api-football", teamId: 0, queryMode: "next" })
+                root.syncFields()
+              }
+            }
+          }
+
+          Text {
+            width: body.width
+            wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
+            visible: !root.isSdb
+            text: "api-football's free plan cannot read the current season, so it cannot show an upcoming fixture. This source needs a paid key."
+            color: Qt.darker(root.fg, 1.7)
+            font.family: root.fontFam
+            font.pixelSize: Style.font.caption
+          }
+
+          Text {
+            text: root.isSdb ? "API key (optional)" : "API key"
             color: Qt.darker(root.fg, 1.3)
             font.family: root.fontFam
             font.pixelSize: Style.font.bodySmall
@@ -463,7 +531,7 @@ Panel {
             // A pasted key is masked; a file:/env: reference is a path, not a
             // secret, so it stays readable.
             password: Model.keyIsSecret(text)
-            placeholderText: "paste your api-football key"
+            placeholderText: root.isSdb ? "optional — leave blank to use the free key" : "paste your api-football key"
             foreground: root.fg
             font.family: root.fontFam
             font.pixelSize: Style.font.bodySmall
@@ -474,7 +542,7 @@ Panel {
             width: body.width
             wrapMode: Text.WordWrap
             textFormat: Text.PlainText
-            text: "From dashboard.api-football.com. To keep it out of shell.json, enter file:~/.config/omarchy/next-match.key or env:API_FOOTBALL_KEY instead."
+            text: root.isSdb ? "TheSportsDB works without a key. Add your own only if you want your own rate limit." : "From dashboard.api-football.com. To keep it out of shell.json, enter file:~/.config/omarchy/next-match.key or env:API_FOOTBALL_KEY instead."
             color: Qt.darker(root.fg, 1.7)
             font.family: root.fontFam
             font.pixelSize: Style.font.caption

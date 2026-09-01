@@ -2,9 +2,17 @@
 
 **Your team's next fixture in the bar, counting down to kick-off.**
 
-A bar widget for the [Omarchy](https://omarchy.org) shell. Paste an
-[api-football](https://dashboard.api-football.com) key and your team's id, and
-the pill tells you who you play next and how long you have to wait.
+A bar widget for the [Omarchy](https://omarchy.org) shell. Give it your team
+and the pill tells you who you play next and how long you have to wait.
+
+Two data sources:
+
+- **TheSportsDB** (default) — free, **no key needed**, and covers leagues
+  api-football's free tier locks away, including the Saudi Pro League.
+- **api-football** — needs a **paid** key. Its free plan is capped at seasons
+  2022-2024 and rejects the `next` parameter, so it cannot read the current
+  season and cannot answer this widget's question at all. The widget detects
+  that and says so rather than sitting there blank.
 
 ## What it shows
 
@@ -28,34 +36,26 @@ forces a refresh.
 omarchy plugin add https://github.com/tsubaie/omarchy-next-match.git --enable
 ```
 
-Then set two values. **Omarchy 4 has no settings form for third-party bar
-widgets yet** — the `schema` in `manifest.json` describes the fields for
-whenever one arrives, but nothing renders it today, so settings are set from
-the command line with `omarchy bar set`. That writes through the running shell,
-so the change applies immediately and a symlinked `shell.json` stays a symlink.
+Click the pill. Its settings panel opens by itself until the widget is usable —
+Omarchy 4 renders no settings form for a third-party bar widget, so the plugin
+carries its own. Pick a data source, search for your team, click it. That is the
+whole setup on TheSportsDB; there is no key to paste.
 
-**Team id** — see [Finding your team id](#finding-your-team-id) below:
-
-```bash
-omarchy bar set tsubaie.next-match teamId 40 --json
-```
-
-**API key** — do not pass the key as an argument. It would be saved in your
-shell history and be briefly visible in `ps` to anyone else on the machine.
-Read it without echoing, put it in a file only you can read, and point the
-widget at the file:
+Everything is also settable from the command line, which writes through the
+running shell (and leaves a symlinked `shell.json` a symlink):
 
 ```bash
-read -rsp 'api-football key: ' k && echo
-install -m 600 /dev/null ~/.config/omarchy/next-match.key
-printf %s "$k" > ~/.config/omarchy/next-match.key && unset k
-omarchy bar set tsubaie.next-match apiKey 'file:~/.config/omarchy/next-match.key'
+omarchy bar set tsubaie.next-match provider thesportsdb
+omarchy bar set tsubaie.next-match teamId 136013 --json
 ```
-
-If you would rather keep it inline in `shell.json` and do not mind it in your
-history, `omarchy bar set tsubaie.next-match apiKey 'your-key'` works too.
 
 ### Finding your team id
+
+Use the search box in the widget's settings panel. Team ids differ between the
+two sources, so switching source clears the id rather than pointing you at a
+stranger.
+
+For api-football there is also a CLI helper:
 
 ```bash
 ~/.config/omarchy/plugins/tsubaie.next-match/scripts/find-team liverpool

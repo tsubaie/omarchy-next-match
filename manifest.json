@@ -22,15 +22,27 @@
       "icon": "⚽",
       "refreshMinutes": 60,
       "showLive": true,
-      "queryMode": "next"
+      "queryMode": "next",
+      "provider": "thesportsdb"
     },
     "schema": [
       {
+        "key": "provider",
+        "type": "enum",
+        "label": "Data source",
+        "options": [
+          "thesportsdb",
+          "api-football"
+        ],
+        "defaultValue": "thesportsdb",
+        "description": "Where fixtures come from. TheSportsDB is free, needs no key of your own, and covers leagues api-football's free tier locks away — including the Saudi Pro League. Choose api-football only if you have a paid key: its free plan cannot read the current season, so it cannot answer this widget's question at all."
+      },
+      {
         "key": "apiKey",
         "type": "string",
-        "label": "API key",
+        "label": "API key (optional)",
         "defaultValue": "",
-        "description": "Your key from dashboard.api-football.com (Profile → API key). Paste it here and it works. To keep it out of shell.json — which matters if you sync your dotfiles to a public remote — write 'file:~/.config/omarchy/next-match.key' to read it from a file instead, or 'env:API_FOOTBALL_KEY' to read it from the environment. Either way the key is never passed on a command line, where any local user could read it out of ps."
+        "description": "Only needed for api-football, where it is required. TheSportsDB works without one on its shared test key; supply your own TheSportsDB key here if you have one and want your own rate limit. Paste it, or keep it out of shell.json with file:~/.config/omarchy/next-match.key or env:API_FOOTBALL_KEY. Either way it is never passed on a command line, where any local user could read it out of ps."
       },
       {
         "key": "teamId",
@@ -40,7 +52,7 @@
         "max": 9999999,
         "step": 1,
         "defaultValue": 0,
-        "description": "api-football's numeric id for your team — 40 is Liverpool, 33 Manchester United, 529 Barcelona. Run scripts/find-team from this plugin's folder to look yours up by name."
+        "description": "Numeric team id, from whichever source you picked — they are different numbers. Use the search box in the widget's own settings panel to find it by name."
       },
       {
         "key": "showLive",
