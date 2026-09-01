@@ -492,6 +492,19 @@ function timingLabel(deltaMs, whenText) {
   return "in " + countdown(deltaMs)
 }
 
+// Nothing worth a word in the bar: no fixture at all, or one still more than a
+// week out. The same seven days that already switch the label from a slot to a
+// rough distance — past them the exact fixture is not what you are glancing at
+// the bar for, so the pill goes quiet and keeps the detail in the panel. A
+// match being played is never far off, whatever its kick-off says.
+function farOff(fx, nowMs) {
+  if (!fx) return true
+  if (matchState(fx) === "live") return false
+  var ko = kickoffMs(fx)
+  if (!isFinite(ko) || !isFinite(nowMs)) return true
+  return ko - nowMs >= WEEK_MS
+}
+
 // "Today" and "Tomorrow" beat a weekday name for the two days you are most
 // likely to be asking about: on Tuesday, "Tue 09:00 PM" makes you check whether
 // it means today or next week. Compared on local calendar days, not on elapsed
@@ -695,6 +708,7 @@ if (typeof module !== "undefined") {
     opponentBadge: opponentBadge,
     countdown: countdown,
     timingLabel: timingLabel,
+    farOff: farOff,
     dayKind: dayKind,
     normalizeName: normalizeName,
     matchesQuery: matchesQuery,

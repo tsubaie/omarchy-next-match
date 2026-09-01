@@ -65,6 +65,13 @@ Panel {
   // showing a countdown re-evaluates together.
   property double nowMs: Date.now()
 
+  // The bar collapses to the icon when there is nothing inside a week: no
+  // fixture, or one still far enough out that the date is panel material rather
+  // than something to glance at. An error or an unpicked team is not "quiet" —
+  // those still need to say so.
+  readonly property bool quiet: configured && errorText === ""
+                                && Model.farOff(root.displayFixture, root.nowMs)
+
   readonly property bool idle: configured && errorText === "" && fixture === null
   readonly property bool needsAttention: !configured || errorText !== ""
 

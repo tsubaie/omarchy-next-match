@@ -336,6 +336,34 @@ eq(M.rateLimited("\nerror code: 1015\n"), true, "with whitespace")
 eq(M.rateLimited('{"teams":[]}'), false, "real JSON is not a rate limit")
 eq(M.rateLimited(""), false, "empty")
 
+console.log("quiet past a week")
+{
+  const at = ms => ({ fixture: { timestamp: Math.round((NOW + ms) / 1000), status: { short: "NS" } },
+                      teams: { home: { id: 1 }, away: { id: 2 } } })
+
+  eq(M.farOff(null, NOW), true, "no fixture at all")
+  eq(M.farOff(at(6 * DAY), NOW), false, "six days out still speaks")
+  eq(M.farOff(at(7 * DAY - 1000), NOW), false, "just inside a week")
+  eq(M.farOff(at(7 * DAY), NOW), true, "exactly a week is already quiet")
+  eq(M.farOff(at(3 * 7 * DAY), NOW), true, "three weeks")
+  eq(M.farOff(at(2 * HOUR), NOW), false, "this afternoon")
+  eq(M.farOff(at(-30 * 60000), NOW), false, "kicked off half an hour ago")
+
+  // A match being played is never far off, whatever its kick-off timestamp
+  // says — the live feed stamps it with "now" anyway.
+  const live = { fixture: { timestamp: Math.round((NOW + 30 * DAY) / 1000), status: { short: "2H" } },
+                 teams: { home: { id: 1 }, away: { id: 2 } } }
+  eq(M.farOff(live, NOW), false, "being played")
+
+  // An unparseable kick-off is not something to count down to.
+  eq(M.farOff({ fixture: { status: { short: "NS" } }, teams: {} }, NOW), true, "no usable kick-off")
+
+  // The boundary is the one the label already uses, so the pill never shows
+  // "in 2 weeks": past a week it shows nothing at all.
+  eq(M.timingLabel(6 * DAY, "Sun 08:30 PM"), "Sun 08:30 PM", "inside a week, the slot")
+  eq(M.farOff(at(8 * DAY), NOW), true, "past a week, quiet instead of a distance")
+}
+
 console.log("today / tomorrow")
 {
   // Compared on calendar days, not elapsed hours: a 00:30 kick-off tonight is

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "tsubaie.next-match",
   "name": "Next Match",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Talal A. Alsubaie",
   "license": "MIT",
   "description": "Your team's next fixture in the bar, both crests and a countdown, with live scores while it plays.",
@@ -71,7 +71,7 @@
         "type": "boolean",
         "label": "Hide when nothing is scheduled",
         "defaultValue": false,
-        "description": "Off-season and international breaks leave no fixture to show. On, the widget takes no space at all until one appears."
+        "description": "Past a week, and off-season, the pill is already just the icon. On, it takes no space at all instead — at the cost of the settings being unreachable from a bar the widget is missing from."
       }
     ]
   }

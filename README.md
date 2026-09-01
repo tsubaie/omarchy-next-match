@@ -36,19 +36,26 @@ elsewhere the widget says exactly that, rather than a blank list.
 
 ## What it shows
 
-In the bar, both clubs with their crests and how long you have to wait.
+In the bar, both clubs with their crests and how long you have to wait — for as
+long as that is worth saying.
 
-Inside a week you get the slot itself, because that is what you plan around.
-Past a week the exact time stops mattering and a distance reads better:
+Inside a week you get the slot itself, because that is what you plan around:
 
-| Until kick-off | Trailing |
-|----------------|----------|
+| Until kick-off | Bar |
+|----------------|-----|
 | Today | `Today 09:00 PM` |
 | Tomorrow | `Tomorrow 06:00 PM` |
 | Later this week | `Sun 08:30 PM` |
-| Weeks | `in 2 weeks` |
-| Months | `in 3 months` |
+| More than a week away | the ⚽ alone |
+| Nothing scheduled | the ⚽ alone |
 | Being played | the score replaces the `v`, with the minute: `Al-Hilal 2 - 1 Al-Ahli 67'` |
+
+Past a week the pill collapses to the icon and nothing else. A fixture that far
+out is not what you are glancing at the bar for, and a permanent `in 3 weeks`
+is bar real estate spent on an answer that does not change. Click it and the
+panel still has the date, the competition and the venue. Off-season it is the
+same icon, so the widget stays somewhere you can reach its settings — set
+`hideWhenIdle` if you would rather it took no space at all.
 
 Click it for the fixture in full — competition and round, both crests and
 names, kick-off in your local time, venue, home or away. Middle click forces a

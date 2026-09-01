@@ -19,6 +19,7 @@ BarWidget {
   readonly property string pillText: panelLoader.item ? panelLoader.item.pillLabel : ""
   readonly property bool configured: panelLoader.item ? panelLoader.item.configured : false
   readonly property bool idle: panelLoader.item ? panelLoader.item.idle : false
+  readonly property bool quiet: panelLoader.item ? panelLoader.item.quiet : false
   readonly property string homeName: panelLoader.item ? panelLoader.item.homeName : ""
   readonly property string awayName: panelLoader.item ? panelLoader.item.awayName : ""
   readonly property string homeBadgeUrl: panelLoader.item ? panelLoader.item.homeBadgeUrl : ""
@@ -26,16 +27,21 @@ BarWidget {
   readonly property string barMiddle: panelLoader.item ? panelLoader.item.barMiddle : ""
   readonly property string barTrailing: panelLoader.item ? panelLoader.item.barTrailing : ""
 
-  // The full fixture is only drawn when there is one and the bar runs
-  // horizontally; a vertical bar gets the icon alone, and anything else (no
-  // team picked, an error, nothing scheduled) falls back to the plain label.
-  readonly property bool showFixture: !root.vertical && root.homeName !== "" && root.awayName !== ""
+  // The full fixture is only drawn when there is one, the bar runs horizontally
+  // and it is close enough to be worth the width; a vertical bar gets the icon
+  // alone, and anything else (no team picked, an error, nothing scheduled)
+  // falls back to the plain label.
+  readonly property bool showFixture: !root.vertical && !root.quiet
+                                      && root.homeName !== "" && root.awayName !== ""
 
   // An unconfigured widget still has to be visible, or the settings that fix it
   // are unreachable from the bar it is missing from.
   readonly property bool concealSelf: hideWhenIdle && configured && idle
 
-  readonly property string label: concealSelf ? "" : (pillText === "" ? "…" : pillText)
+  // Empty while quiet, which leaves the icon on its own — Row skips invisible
+  // children, so the pill shrinks to the glyph rather than keeping a gap where
+  // the text was.
+  readonly property string label: (concealSelf || root.quiet) ? "" : (pillText === "" ? "…" : pillText)
 
   // A crest is drawn only once it has actually loaded; until then the row is
   // just the names, which is better than a gap that pops.
@@ -150,7 +156,7 @@ BarWidget {
 
     Text {
       anchors.verticalCenter: parent.verticalCenter
-      visible: !root.showFixture && !root.vertical
+      visible: !root.showFixture && !root.vertical && root.label !== ""
       text: root.label
       textFormat: Text.PlainText
       color: labelRow.ink
