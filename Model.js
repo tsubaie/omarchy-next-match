@@ -202,6 +202,41 @@ function keyResolverScript(spec) {
   return 'printf %s "$NM_KEY"'
 }
 
+// ---------------------------------------------------------------- team search
+
+// api-football rejects a search shorter than 3 characters, so the UI can say
+// so instead of spending a request to be told.
+function searchValid(query) {
+  return String(query || "").trim().length >= 3
+}
+
+function teamsUrl(query) {
+  return "https://v3.football.api-sports.io/teams?search=" +
+    encodeURIComponent(String(query || "").trim())
+}
+
+function parseTeams(payload) {
+  if (!payload || !Array.isArray(payload.response)) return []
+  var out = []
+  for (var i = 0; i < payload.response.length; ++i) {
+    var t = payload.response[i] && payload.response[i].team
+    if (!t || !t.id) continue
+    out.push({
+      id: t.id,
+      name: String(t.name || ""),
+      country: String(t.country || ""),
+      code: String(t.code || "")
+    })
+  }
+  return out
+}
+
+// What to show in the key field. A file:/env: reference is a path, not a
+// secret, so it stays readable; a pasted key is masked.
+function keyIsSecret(spec) {
+  return parseKeySpec(spec).mode === "inline"
+}
+
 // --------------------------------------------------------------------- sanitize
 
 // Bar labels render through a Text that would otherwise rich-text-parse a
@@ -230,6 +265,10 @@ if (typeof module !== "undefined") {
     refreshMinutes: refreshMinutes,
     parseKeySpec: parseKeySpec,
     keyResolverScript: keyResolverScript,
+    searchValid: searchValid,
+    teamsUrl: teamsUrl,
+    parseTeams: parseTeams,
+    keyIsSecret: keyIsSecret,
     plainText: plainText,
     validTeamId: validTeamId
   }

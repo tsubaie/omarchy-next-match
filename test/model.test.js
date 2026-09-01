@@ -122,5 +122,21 @@ eq(M.validTeamId("40"), 40, "numeric string")
 eq(M.validTeamId("nope"), 0, "garbage -> 0")
 eq(M.validTeamId(-3), 0, "negative -> 0")
 
+// ---- team search helpers
+console.log("\nteam search")
+eq(M.searchValid("li"), false, "under 3 chars rejected before spending a request")
+eq(M.searchValid("liv"), true, "3 chars ok")
+eq(M.searchValid("  a  "), false, "whitespace does not count")
+eq(M.teamsUrl("real madrid"), "https://v3.football.api-sports.io/teams?search=real%20madrid", "query encoded")
+eq(M.parseTeams({ response: [
+     { team: { id: 40, name: "Liverpool", country: "England", code: "LIV" } },
+     { team: { id: null, name: "broken" } },
+     { notteam: 1 }
+   ] }), [{ id: 40, name: "Liverpool", country: "England", code: "LIV" }], "malformed rows dropped")
+eq(M.parseTeams({}), [], "no response array")
+eq(M.keyIsSecret("abc123"), true, "pasted key is masked")
+eq(M.keyIsSecret("file:~/x"), false, "file ref is not a secret")
+eq(M.keyIsSecret("env:FOO"), false, "env ref is not a secret")
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

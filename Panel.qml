@@ -216,6 +216,119 @@ Panel {
     'if [ -n "$out" ]; then mkdir -p "$(dirname "$NM_CACHE")" && printf %s "$out" > "$NM_CACHE".tmp && mv -f "$NM_CACHE".tmp "$NM_CACHE"; fi\n' +
     'printf %s "$out"\n'
 
+  // ------------------------------------------------------------------ settings
+
+  // Omarchy 4 renders no settings form for a third-party bar widget — the
+  // manifest schema is metadata nothing consumes yet — so the plugin carries
+  // its own. Writing goes through the shell's own updateEntryInline, the same
+  // call the built-in clock uses to persist a cycled format: it is in-process,
+  // so the key never becomes an argument to anything, and it writes shell.json
+  // through the shell's FileView, which follows a symlink instead of replacing
+  // it (the case if you stow your dotfiles).
+  property bool showSettings: false
+  readonly property bool settingsOpen: showSettings || !configured
+
+  property string savedNote: ""
+  property var searchResults: []
+  property string searchNote: ""
+  property bool searching: false
+
+  function persistSettings(values) {
+    var entry = { id: root.moduleName }
+    for (var existing in root.settings) if (existing !== "id") entry[existing] = root.settings[existing]
+    for (var key in values) entry[key] = values[key]
+
+    root.settings = entry
+    if (root.hostWidget && "settings" in root.hostWidget) root.hostWidget.settings = entry
+    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
+  function saveFields() {
+    var team = parseInt(String(teamField.text).trim(), 10)
+    persistSettings({
+      apiKey: String(keyField.text).trim(),
+      teamId: isFinite(team) && team > 0 ? team : 0
+    })
+    root.savedNote = "Saved"
+    savedNoteTimer.restart()
+    root.errorText = ""
+    root.refresh(true)
+  }
+
+  function syncFields() {
+    keyField.text = root.apiKeySpec
+    teamField.text = root.teamId > 0 ? String(root.teamId) : ""
+  }
+
+  function pickTeam(id, name) {
+    teamField.text = String(id)
+    root.searchResults = []
+    root.searchNote = "Selected " + name
+    saveFields()
+  }
+
+  function searchTeams() {
+    var q = String(searchField.text).trim()
+    if (!Model.searchValid(q)) { root.searchNote = "Type at least 3 characters"; return }
+    if (!hasKey) { root.searchNote = "Add your API key first"; return }
+    if (searchProc.running) return
+    root.searchResults = []
+    root.searchNote = "Searching…"
+    root.searching = true
+    searchProc.running = true
+  }
+
+  function onSearched(raw) {
+    root.searching = false
+    var text = String(raw || "").trim()
+    if (text === "") { root.searchNote = "No answer — check your connection"; return }
+    try {
+      var payload = JSON.parse(text)
+      var err = Model.apiError(payload)
+      if (err !== "") { root.searchNote = err; return }
+      var teams = Model.parseTeams(payload)
+      root.searchResults = teams
+      root.searchNote = teams.length === 0 ? "Nothing matched" : ""
+    } catch (e) {
+      root.searchNote = "Bad response"
+    }
+  }
+
+  Timer {
+    id: savedNoteTimer
+    interval: 2500
+    onTriggered: root.savedNote = ""
+  }
+
+  // Same key handling as the fixture fetch: environment in, config file on
+  // stdin, nothing secret in argv.
+  Process {
+    id: searchProc
+    running: false
+    command: ["bash", "-c", root.fetchScriptFor]
+    environment: ({
+      "NM_KEY": root.keySpec.mode === "inline" ? root.keySpec.value : "",
+      "NM_KEY_REF": root.keySpec.mode === "inline" ? "" : root.keySpec.value,
+      "NM_URL": Model.teamsUrl(searchField.text),
+      "NM_CACHE": ""
+    })
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.onSearched(text)
+    }
+  }
+
+  // The fixture script caches; the search must not overwrite that cache, so it
+  // reuses the same key handling with the caching step skipped.
+  readonly property string fetchScriptFor:
+    'key=$(' + Model.keyResolverScript(root.apiKeySpec) + ')\n' +
+    'key=$(printf %s "$key" | tr -d "[:space:]")\n' +
+    'if [ -z "$key" ]; then printf %s \'{"errors":{"token":"missing"}}\'; exit 0; fi\n' +
+    'printf \'header = "x-apisports-key: %s"\\nurl = "%s"\\n\' "$key" "$NM_URL" | curl -fsS --max-time 20 -K -\n'
+
+  onOpenedChanged: if (opened) syncFields()
+
   // -------------------------------------------------------------- panel plumbing
 
   function open() {
@@ -266,35 +379,156 @@ Panel {
         width: parent.width
         spacing: Style.space(10)
 
-        // ---- setup guidance, shown until both settings are present
+        // ---- settings form. Shown automatically until the widget is usable,
+        // and on demand afterwards.
         Column {
           width: parent.width
           spacing: Style.space(6)
-          visible: !root.configured
+          visible: root.settingsOpen
 
           Text {
-            text: "Next Match needs setting up"
+            text: root.configured ? "Settings" : "Next Match needs setting up"
             color: root.fg
             font.family: root.fontFam
             font.pixelSize: Style.font.body
             font.bold: true
           }
+
+          Text {
+            text: "API key"
+            color: Qt.darker(root.fg, 1.3)
+            font.family: root.fontFam
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          TextField {
+            id: keyField
+            width: parent.width
+            // A pasted key is masked; a file:/env: reference is a path, not a
+            // secret, so it stays readable.
+            password: Model.keyIsSecret(text)
+            placeholderText: "paste your api-football key"
+            foreground: root.fg
+            font.family: root.fontFam
+            font.pixelSize: Style.font.bodySmall
+            onAccepted: root.saveFields()
+          }
+
           Text {
             width: body.width
             wrapMode: Text.WordWrap
             textFormat: Text.PlainText
-            text: (!root.hasKey ? "Add your api-football key in this widget's settings. " : "")
-                  + (root.teamId <= 0 ? "Add your team's numeric id — run scripts/find-team in the plugin folder to look it up by name." : "")
-            color: Qt.darker(root.fg, 1.4)
+            text: "From dashboard.api-football.com. To keep it out of shell.json, enter file:~/.config/omarchy/next-match.key or env:API_FOOTBALL_KEY instead."
+            color: Qt.darker(root.fg, 1.7)
+            font.family: root.fontFam
+            font.pixelSize: Style.font.caption
+          }
+
+          Text {
+            text: "Team ID"
+            color: Qt.darker(root.fg, 1.3)
             font.family: root.fontFam
             font.pixelSize: Style.font.bodySmall
+          }
+
+          TextField {
+            id: teamField
+            width: parent.width
+            placeholderText: "e.g. 40"
+            validator: IntValidator { bottom: 0; top: 9999999 }
+            foreground: root.fg
+            font.family: root.fontFam
+            font.pixelSize: Style.font.bodySmall
+            onAccepted: root.saveFields()
+          }
+
+          // Nobody knows their team's numeric id, so it can be looked up here
+          // rather than in a terminal.
+          Row {
+            width: parent.width
+            spacing: Style.space(6)
+
+            TextField {
+              id: searchField
+              width: parent.width - searchBtn.width - Style.space(6)
+              placeholderText: "or search by name, e.g. liverpool"
+              foreground: root.fg
+              font.family: root.fontFam
+              font.pixelSize: Style.font.bodySmall
+              onAccepted: root.searchTeams()
+            }
+
+            Button {
+              id: searchBtn
+              text: root.searching ? "…" : "Search"
+              bordered: true
+              foreground: root.fg
+              fontFamily: root.fontFam
+              fontSize: Style.font.bodySmall
+              onClicked: root.searchTeams()
+            }
+          }
+
+          Text {
+            width: body.width
+            visible: root.searchNote !== ""
+            wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
+            text: root.searchNote
+            color: Qt.darker(root.fg, 1.5)
+            font.family: root.fontFam
+            font.pixelSize: Style.font.caption
+          }
+
+          Column {
+            width: parent.width
+            spacing: Style.space(2)
+
+            Repeater {
+              model: root.searchResults
+
+              Button {
+                required property var modelData
+                width: body.width
+                bordered: false
+                text: modelData.name
+                      + (modelData.country ? "  ·  " + modelData.country : "")
+                      + "  ·  " + modelData.id
+                foreground: root.fg
+                fontFamily: root.fontFam
+                fontSize: Style.font.bodySmall
+                onClicked: root.pickTeam(modelData.id, modelData.name)
+              }
+            }
+          }
+
+          Row {
+            spacing: Style.space(8)
+
+            Button {
+              text: "Save"
+              bordered: true
+              foreground: root.fg
+              fontFamily: root.fontFam
+              fontSize: Style.font.bodySmall
+              onClicked: root.saveFields()
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              visible: root.savedNote !== ""
+              text: root.savedNote
+              color: Qt.darker(root.fg, 1.4)
+              font.family: root.fontFam
+              font.pixelSize: Style.font.bodySmall
+            }
           }
         }
 
         // ---- error
         Text {
           width: body.width
-          visible: root.configured && root.errorText !== ""
+          visible: !root.settingsOpen && root.configured && root.errorText !== ""
           wrapMode: Text.WordWrap
           textFormat: Text.PlainText
           text: root.errorText
@@ -305,7 +539,7 @@ Panel {
 
         // ---- nothing scheduled
         Text {
-          visible: root.configured && root.errorText === "" && root.fixture === null && root.lastFetchMs > 0
+          visible: !root.settingsOpen && root.configured && root.errorText === "" && root.fixture === null && root.lastFetchMs > 0
           text: "No upcoming fixture"
           color: Qt.darker(root.fg, 1.4)
           font.family: root.fontFam
@@ -317,7 +551,7 @@ Panel {
         Column {
           width: parent.width
           spacing: Style.space(8)
-          visible: root.fixture !== null && root.errorText === ""
+          visible: !root.settingsOpen && root.fixture !== null && root.errorText === ""
 
           Text {
             width: body.width
@@ -393,8 +627,23 @@ Panel {
 
         PanelSeparator { width: parent.width }
 
+        Button {
+          visible: root.configured
+          text: root.showSettings ? "Done" : "Settings"
+          bordered: false
+          foreground: Qt.darker(root.fg, 1.4)
+          fontFamily: root.fontFam
+          fontSize: Style.font.bodySmall
+          onClicked: {
+            root.showSettings = !root.showSettings
+            if (root.showSettings) root.syncFields()
+            else root.searchResults = []
+          }
+        }
+
         Text {
           width: body.width
+          visible: !root.settingsOpen
           textFormat: Text.PlainText
           text: {
             if (root.fetching) return "Refreshing…"
