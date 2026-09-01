@@ -27,6 +27,13 @@ function sdbSearchUrl(key, query) {
 // nothing where "Al Hilal SFC" finds it, because it matches the alternate-names
 // field rather than the club name. Browsing a league is exact, so a search that
 // comes back empty tries the query again as a league name.
+// Every club in a country, across its leagues. Capped at ten alphabetically on
+// the shared key, which is why the picker also searches by name.
+function sdbCountryTeamsUrl(key, country) {
+  return sdbUrl(key, "search_all_teams.php?c=" +
+    encodeURIComponent(String(country || "").trim()) + "&s=Soccer")
+}
+
 function sdbLeagueTeamsUrl(key, league) {
   return sdbUrl(key, "search_all_teams.php?l=" + encodeURIComponent(String(league || "").trim()))
 }
@@ -316,6 +323,28 @@ function sides(fx, teamId) {
   }
 }
 
+// Merge search results into the browsed list: same club from either route
+// appears once, and anything from another country is dropped, since the user
+// has already said which one they mean.
+function mergeTeams(existing, found, country) {
+  var out = []
+  var seen = {}
+  var want = String(country || "").trim().toLowerCase()
+  function add(t) {
+    if (!t || !t.id) return
+    if (want && String(t.country || "").trim().toLowerCase() !== want) return
+    if (seen[t.id]) return
+    seen[t.id] = true
+    out.push(t)
+  }
+  var a = Array.isArray(existing) ? existing : []
+  var b = Array.isArray(found) ? found : []
+  for (var i = 0; i < b.length; ++i) add(b[i])
+  for (var j = 0; j < a.length; ++j) add(a[j])
+  out.sort(function(x, y) { return x.name < y.name ? -1 : (x.name > y.name ? 1 : 0) })
+  return out
+}
+
 // The opponent's badge. You already know which club is yours, so theirs is the
 // one worth the pixels in the bar.
 function opponentBadge(fx, teamId) {
@@ -363,6 +392,18 @@ function whenLabel(parts) {
   return parts.weekday + " " + parts.time
 }
 
+// Inside a week, a day and a time is what you actually plan around — "Sun
+// 08:30 PM" beats "in 5 days", which you would have to count out on a calendar.
+// Past a week the exact slot stops mattering and a rough distance reads better.
+var WEEK_MS = 7 * 24 * 3600 * 1000
+
+function timingLabel(deltaMs, whenText) {
+  if (!isFinite(deltaMs)) return ""
+  if (deltaMs <= 0) return "kick-off"
+  if (deltaMs < WEEK_MS) return String(whenText || "")
+  return "in " + countdown(deltaMs)
+}
+
 // ------------------------------------------------------------------- pill label
 
 // Adaptive: a date while the match is far off, a countdown once it is close
@@ -394,7 +435,7 @@ function pillLabel(fx, nowMs, opts) {
   // countdown would read "now" forever; say kick-off instead.
   if (delta <= 0) return (opts.atPrefix !== false ? (s.atHome ? "vs " : "at ") : "") + s.them.name + "  kick-off"
 
-  return (s.atHome ? "vs " : "at ") + s.them.name + "  in " + countdown(delta)
+  return (s.atHome ? "vs " : "at ") + s.them.name + "  " + timingLabel(delta, opts.whenText)
 }
 
 // ------------------------------------------------------------------ selection
@@ -489,6 +530,7 @@ if (typeof module !== "undefined") {
     sdbNextUrl: sdbNextUrl,
     sdbSearchUrl: sdbSearchUrl,
     sdbLeagueTeamsUrl: sdbLeagueTeamsUrl,
+    sdbCountryTeamsUrl: sdbCountryTeamsUrl,
     sdbLiveUrl: sdbLiveUrl,
     sdbLiveForTeam: sdbLiveForTeam,
     liveWindow: liveWindow,
@@ -509,8 +551,10 @@ if (typeof module !== "undefined") {
     kickoffMs: kickoffMs,
     shortCode: shortCode,
     sides: sides,
+    mergeTeams: mergeTeams,
     opponentBadge: opponentBadge,
     countdown: countdown,
+    timingLabel: timingLabel,
     whenLabel: whenLabel,
     pillLabel: pillLabel,
     refreshMinutes: refreshMinutes,

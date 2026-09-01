@@ -16,21 +16,19 @@ In the bar, both clubs with their crests and how long you have to wait:
   [crest] Al-Hilal v Al-Ahli [crest]   in 2h
 ```
 
-The trailing part is a countdown in the largest unit that still says something
-useful:
+Inside a week you get the slot itself, because that is what you plan around.
+Past a week the exact time stops mattering and a distance reads better:
 
 | Until kick-off | Trailing |
 |----------------|----------|
-| Months away | `in 3 months` |
-| Weeks | `in 3 weeks` |
-| Days | `in 5 days` |
-| Inside a day | `in 2:53` — a clock, because "2h" throws away fifty minutes |
-| Under an hour | `in 45 min` |
+| Less than 7 days | `Sun 08:30 PM` |
+| Weeks | `in 2 weeks` |
+| Months | `in 3 months` |
 | Being played | the score replaces the `v`, with the minute: `Al-Hilal 2 - 1 Al-Ahli 67'` |
 
 Click it for the fixture in full — competition and round, both crests and
-names, kick-off in your local time, venue, home or away — and under it the
-next three fixtures after that one. Middle click forces a refresh.
+names, kick-off in your local time, venue, home or away. Middle click forces a
+refresh.
 
 ### Which competitions
 
@@ -46,35 +44,6 @@ every soccer match being played, which the widget starts polling ten minutes
 before kick-off and stops once the match has left it. Nothing to configure;
 turn it off with `showLive` if you would rather not know before you watch it
 back.
-
-**The next three only appear with a personal key.** TheSportsDB's shared test
-key returns exactly one upcoming fixture per team, so on the default setup that
-list is empty and says so. A personal key returns ten, which fills it. The
-fixture itself, the crests, the countdown and live scores all work on the shared
-key.
-
-## Install
-
-```bash
-omarchy plugin add https://github.com/tsubaie/omarchy-next-match.git --enable
-```
-
-Click the pill and walk **country → league → club**, with a filter box at each
-step. That is the whole setup.
-
-The country list is a built-in one merged with whatever the API returns:
-TheSportsDB's own `all_countries.php` stops at the first 50 by ISO code — it
-ends at Costa Rica, so Saudi Arabia is never in it. Any country not listed is
-still reachable: type it and the filter offers to look it up directly.
-
-Browsing rather than typing is deliberate: TheSportsDB's club search matches an
-alternate-names field, so `Al-Hilal` returns nothing where `Al Hilal SFC` finds
-it. Picking from a list cannot miss, and it is also how you find a club whose
-exact name you do not know.
-
-Omarchy 4 renders no settings form for a third-party bar widget, so the plugin
-carries its own; it opens by itself until a team is picked, and from a "Change
-team" button afterwards.
 
 ### If it says it is rate limited
 

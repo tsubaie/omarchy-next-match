@@ -94,23 +94,45 @@ eq(M.countdown(45 * DAY), "1 month", "singular month")
 eq(M.countdown(95 * DAY), "3 months", "months")
 eq(M.countdown(-5), "now", "past")
 
-console.log("pill (adaptive)")
-const when = { weekday: "Tue", time: "21:00" }
-eq(M.pillLabel(fx({ strTimestamp: "2026-09-05T18:00:00" }), NOW, { teamId: 136013, when }),
-   "vs Al-Ahli  in 4 days", "days out -> a day count, not a bare date")
-eq(M.pillLabel(fx({ strTimestamp: "2026-11-05T18:00:00" }), NOW, { teamId: 136013, when }),
+console.log("pill")
+// Inside a week the widget shows the slot itself; past a week, a distance.
+const WHEN = "Sun 08:30 PM"
+eq(M.timingLabel(2 * DAY, WHEN), WHEN, "two days out -> the day and time")
+eq(M.timingLabel(6 * DAY, WHEN), WHEN, "six days is still inside the week")
+eq(M.timingLabel(8 * DAY, WHEN), "in 1 week", "past a week -> a distance")
+eq(M.timingLabel(20 * DAY, WHEN), "in 2 weeks", "weeks")
+eq(M.timingLabel(70 * DAY, WHEN), "in 2 months", "months")
+eq(M.timingLabel(-1, WHEN), "kick-off", "already started")
+eq(M.timingLabel(NaN, WHEN), "", "no date")
+
+eq(M.pillLabel(fx(), NOW, { teamId: 136013, whenText: WHEN }),
+   "vs Al-Ahli  " + WHEN, "match inside the week -> day and time, home")
+eq(M.pillLabel(fx(), NOW, { teamId: 137721, whenText: WHEN }),
+   "at Al-Hilal  " + WHEN, "away fixture says 'at'")
+eq(M.pillLabel(fx({ strTimestamp: "2026-11-05T18:00:00" }), NOW, { teamId: 136013, whenText: WHEN }),
    "vs Al-Ahli  in 2 months", "months out")
-eq(M.pillLabel(fx(), NOW, { teamId: 136013, when }), "vs Al-Ahli  in 6:00", "match day -> a clock")
-eq(M.pillLabel(fx({ strTimestamp: "2026-09-01T12:12:00" }), NOW, { teamId: 136013, when }),
-   "vs Al-Ahli  in 12 min", "imminent")
-eq(M.pillLabel(fx(), NOW, { teamId: 137721, when }), "at Al-Hilal  in 6:00", "away fixture says 'at'")
 eq(M.pillLabel(fx({ strStatus: "2H", strProgress: "67", intHomeScore: "2", intAwayScore: "1",
-                    strTimestamp: "2026-09-01T11:00:00" }), NOW, { teamId: 136013, when }),
+                    strTimestamp: "2026-09-01T11:00:00" }), NOW, { teamId: 136013, whenText: WHEN }),
    "HIL 2 - 1 AHL  67'", "live score")
 eq(M.pillLabel(fx({ strStatus: "HT", intHomeScore: "1", intAwayScore: "0",
-                    strTimestamp: "2026-09-01T11:00:00" }), NOW, { teamId: 136013, when }),
+                    strTimestamp: "2026-09-01T11:00:00" }), NOW, { teamId: 136013, whenText: WHEN }),
    "HIL 1 - 0 AHL  HT", "half time")
-eq(M.pillLabel(null, NOW, { teamId: 136013, when }), "No match", "no fixture")
+eq(M.pillLabel(null, NOW, { teamId: 136013, whenText: WHEN }), "No match", "no fixture")
+
+console.log("merging search into the browsed list")
+{
+  const browsed = [{ id: 1, name: "Abha", country: "Saudi Arabia" },
+                   { id: 2, name: "Al-Ahli", country: "Saudi Arabia" }]
+  const found = [{ id: 3, name: "Al-Nassr", country: "Saudi Arabia" },
+                 { id: 9, name: "Liverpool", country: "England" },
+                 { id: 2, name: "Al-Ahli", country: "Saudi Arabia" }]
+  const merged = M.mergeTeams(browsed, found, "Saudi Arabia")
+  eq(merged.map(t => t.name), ["Abha", "Al-Ahli", "Al-Nassr"], "a club past the ten-item cap is reachable by search")
+  eq(merged.filter(t => t.name === "Al-Ahli").length, 1, "no duplicate from both routes")
+  eq(M.mergeTeams(browsed, found, "England").map(t => t.name), ["Liverpool"],
+     "filtering to England keeps only the English club")
+  eq(M.mergeTeams(null, null, "Spain"), [], "nothing at all")
+}
 
 console.log("selection")
 {
@@ -172,7 +194,7 @@ const LIVE = { livescore: [
   eq(l.teams.home.name, "Al-Hilal", "found our match among every live game")
   eq(l.goals.home, 2, "score")
   eq(M.matchState(l), "live", "state is live")
-  eq(M.pillLabel(l, NOW, { teamId: 136013, when }), "HIL 2 - 1 AHL  67'", "live pill")
+  eq(M.pillLabel(l, NOW, { teamId: 136013, whenText: WHEN }), "HIL 2 - 1 AHL  67'", "live pill")
   eq(M.sdbLiveForTeam(LIVE, 12345), null, "not playing -> nothing")
   eq(M.sdbLiveForTeam({}, 136013), null, "empty feed")
 }

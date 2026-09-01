@@ -96,21 +96,16 @@ Panel {
     }
     if (state === "off") return "postponed"
     var ko = Model.kickoffMs(root.displayFixture)
-    var delta = ko - root.nowMs
-    if (!isFinite(delta)) return ""
-    if (delta <= 0) return "kick-off"
-    if (delta > 24 * 3600 * 1000) return root.whenParts ? Model.whenLabel(root.whenParts) : ""
-    return "in " + Model.countdown(delta)
+    if (!isFinite(ko)) return ""
+    return Model.timingLabel(ko - root.nowMs, root.whenText)
   }
 
-  // Up to three fixtures after the one in the hero.
-  property var laterFixtures: []
 
-  readonly property var whenParts: {
+  // "Sun 08:30 PM" — the shape used while a match is inside a week.
+  readonly property string whenText: {
     var ko = Model.kickoffMs(root.displayFixture)
-    if (!isFinite(ko)) return null
-    var d = new Date(ko)
-    return { weekday: Qt.formatDateTime(d, "ddd"), time: Qt.formatDateTime(d, "HH:mm") }
+    if (!isFinite(ko)) return ""
+    return Qt.formatDateTime(new Date(ko), "ddd hh:mm AP")
   }
 
   readonly property string pillLabel: {
@@ -120,7 +115,7 @@ Panel {
     return Model.pillLabel(root.displayFixture, root.nowMs, {
       teamId: root.teamId,
       showLive: root.showLive,
-      when: root.whenParts
+      whenText: root.whenText
     })
   }
 
@@ -150,9 +145,7 @@ Panel {
 
   function applyPayload(payload, fromCache) {
     root.errorText = ""
-    var all = Model.upcomingFixtures(Model.sdbFixtures(payload), Date.now(), 4)
-    root.fixture = all.length > 0 ? all[0] : null
-    root.laterFixtures = all.slice(1, 4)
+    root.fixture = Model.pickNextFixture(Model.sdbFixtures(payload), Date.now())
     if (!fromCache) root.lastFetchMs = Date.now()
     scheduleNext()
   }
@@ -228,7 +221,6 @@ Panel {
   onTeamIdChanged: {
     root.fixture = null
     root.liveFixture = null
-    root.laterFixtures = []
     root.errorText = ""
     if (configured) refresh(true)
   }
@@ -317,11 +309,9 @@ Panel {
   // "Al Hilal SFC" finds it. Browsing does work, and it is also how you find a
   // club whose exact name you do not know — so the picker walks
   // country -> league -> club, with a filter box at each step.
-  property string browseStage: "country"     // country | league | team
+  property string browseStage: "country"     // country | team
   property string chosenCountry: ""
-  property string chosenLeague: ""
   property var countryList: []
-  property var leagueList: []
   property var teamList: []
   property string browseNote: ""
   property bool browsing: false
@@ -330,8 +320,7 @@ Panel {
 
   readonly property var visibleRows: {
     var q = String(filterField.text).trim().toLowerCase()
-    var src = root.browseStage === "country" ? root.countryList
-            : (root.browseStage === "league" ? root.leagueList : root.teamList)
+    var src = root.browseStage === "country" ? root.countryList : root.teamList
     if (q === "") return src
     var out = []
     for (var i = 0; i < src.length; ++i) {
@@ -344,8 +333,6 @@ Panel {
   function startBrowse() {
     root.browseStage = "country"
     root.chosenCountry = ""
-    root.chosenLeague = ""
-    root.leagueList = []
     root.teamList = []
     filterField.text = ""
     root.browseNote = ""
@@ -369,24 +356,42 @@ Panel {
 
   function chooseCountry(name) {
     root.chosenCountry = name
-    root.browseStage = "league"
-    root.leagueList = []
-    filterField.text = ""
-    fetchBrowse("league", Model.sdbLeaguesUrl(root.sdbKey, name))
-  }
-
-  function chooseLeague(name) {
-    root.chosenLeague = name
     root.browseStage = "team"
     root.teamList = []
     filterField.text = ""
-    fetchBrowse("team", Model.sdbLeagueTeamsUrl(root.sdbKey, name))
+    fetchBrowse("team", Model.sdbCountryTeamsUrl(root.sdbKey, name))
+  }
+
+  // The shared key returns only ten clubs per country, alphabetically — the
+  // Saudi list stops before Al-Hilal and the English one before Liverpool — so
+  // the list alone cannot reach most clubs. Searching by name does, and its
+  // hits are merged into the list, dropping anything from another country.
+  function searchTeamsByName() {
+    var q = String(filterField.text).trim()
+    if (q.length < 3 || browseProc.running) return
+    root.searchVariants = Model.sdbSearchVariants(q)
+    root.browseNote = "Searching…"
+    root.browsing = true
+    runTeamSearch()
+  }
+
+  property var searchVariants: []
+
+  function runTeamSearch() {
+    if (root.searchVariants.length === 0) {
+      root.browsing = false
+      root.browseNote = "No club matched. Punctuation matters here — try \"Al Nassr\" rather than \"Al-Nassr\"."
+      return
+    }
+    var rest = root.searchVariants.slice()
+    var next = rest.shift()
+    root.searchVariants = rest
+    fetchBrowse("search", Model.sdbSearchUrl(root.sdbKey, next))
   }
 
   function browseBack() {
     filterField.text = ""
-    if (root.browseStage === "team") { root.browseStage = "league"; root.browseNote = "" }
-    else if (root.browseStage === "league") { root.browseStage = "country"; root.browseNote = "" }
+    if (root.browseStage === "team") { root.browseStage = "country"; root.browseNote = "" }
   }
 
   function onBrowsed(raw) {
@@ -403,14 +408,19 @@ Panel {
     if (root.browseKind === "country") {
       root.countryList = Model.sdbCountries(payload)
       root.browseNote = root.countryList.length === 0 ? "No countries returned" : ""
-    } else if (root.browseKind === "league") {
-      root.leagueList = Model.sdbLeagues(payload)
-      root.browseNote = root.leagueList.length === 0
-        ? "No football leagues listed for " + root.chosenCountry + ". Try Back and a different spelling."
+    } else if (root.browseKind === "search") {
+      var hits = Model.sdbTeams(payload)
+      if (hits.length === 0) { runTeamSearch(); return }
+      root.searchVariants = []
+      root.teamList = Model.mergeTeams(root.teamList, hits, root.chosenCountry)
+      root.browseNote = root.teamList.length === 0
+        ? "Found it, but not in " + root.chosenCountry + ". Go Back and pick the right country."
         : ""
     } else {
       root.teamList = Model.sdbTeams(payload)
-      root.browseNote = root.teamList.length === 0 ? "No clubs listed for " + root.chosenLeague : ""
+      root.browseNote = root.teamList.length === 0
+        ? "No clubs listed for " + root.chosenCountry + ". Try a different spelling."
+        : ""
     }
   }
 
@@ -513,8 +523,7 @@ Panel {
           visible: root.settingsOpen
 
           Text {
-            text: root.browseStage === "country" ? "Pick a country"
-                : (root.browseStage === "league" ? root.chosenCountry : root.chosenLeague)
+            text: root.browseStage === "country" ? "Pick a country" : root.chosenCountry
             color: root.fg
             font.family: root.fontFam
             font.pixelSize: Style.font.body
@@ -541,11 +550,23 @@ Panel {
             TextField {
               id: filterField
               width: parent.width - (backBtn.visible ? backBtn.width + Style.space(6) : 0)
-              placeholderText: root.browseStage === "country" ? "filter countries"
-                             : (root.browseStage === "league" ? "filter leagues" : "filter clubs")
+                     - (findBtn.visible ? findBtn.width + Style.space(6) : 0)
+              placeholderText: root.browseStage === "country" ? "filter countries" : "filter, or type a club and press Enter"
               foreground: root.fg
               font.family: root.fontFam
               font.pixelSize: Style.font.bodySmall
+              onAccepted: if (root.browseStage === "team") root.searchTeamsByName()
+            }
+
+            Button {
+              id: findBtn
+              visible: root.browseStage === "team"
+              text: root.browsing ? "…" : "Find"
+              bordered: true
+              foreground: root.fg
+              fontFamily: root.fontFam
+              fontSize: Style.font.bodySmall
+              onClicked: root.searchTeamsByName()
             }
           }
 
@@ -557,7 +578,7 @@ Panel {
                      && String(filterField.text).trim().length >= 3
                      && root.visibleRows.length === 0
             bordered: true
-            text: "Look up \"" + String(filterField.text).trim() + "\""
+            text: "Look up country \"" + String(filterField.text).trim() + "\""
             foreground: root.fg
             fontFamily: root.fontFam
             fontSize: Style.font.bodySmall
@@ -597,13 +618,15 @@ Panel {
                   required property var modelData
                   width: body.width
                   bordered: false
+                  // The league disambiguates: a country list carries both
+                  // "Al-Hilal" and "Al Hilal Women".
                   text: modelData.name
+                        + (root.browseStage === "team" && modelData.code ? "   ·   " + modelData.code : "")
                   foreground: root.fg
                   fontFamily: root.fontFam
                   fontSize: Style.font.bodySmall
                   onClicked: {
                     if (root.browseStage === "country") root.chooseCountry(modelData.name)
-                    else if (root.browseStage === "league") root.chooseLeague(modelData.name)
                     else root.pickTeam(modelData.id, modelData.name)
                   }
                 }
@@ -724,8 +747,9 @@ Panel {
               if (state === "live") return "Live now"
               if (state === "finished") return "Finished"
               var delta = ko - root.nowMs
-              return Qt.formatDateTime(d, "dddd d MMMM, HH:mm")
-                     + (delta > 0 ? "   ·   in " + Model.countdown(delta) : "")
+              var far = delta >= 7 * 24 * 3600 * 1000
+              return Qt.formatDateTime(d, "dddd d MMMM, hh:mm AP")
+                     + (far && delta > 0 ? "   ·   in " + Model.countdown(delta) : "")
             }
             color: root.fg
             font.family: root.fontFam
@@ -746,91 +770,6 @@ Panel {
             color: Qt.darker(root.fg, 1.4)
             font.family: root.fontFam
             font.pixelSize: Style.font.bodySmall
-          }
-        }
-
-        // ---- the three fixtures after this one. TheSportsDB only publishes a
-        // few rounds ahead early in a season, so this fills in over time
-        // rather than always holding three.
-        Column {
-          width: parent.width
-          spacing: Style.space(4)
-          visible: !root.settingsOpen && root.fixture !== null && root.errorText === ""
-
-          PanelSeparator { width: parent.width }
-
-          Text {
-            text: "Then"
-            color: Qt.darker(root.fg, 1.5)
-            font.family: root.fontFam
-            font.pixelSize: Style.font.caption
-          }
-
-          Repeater {
-            model: root.laterFixtures
-
-            Row {
-              required property var modelData
-              width: body.width
-              spacing: Style.space(6)
-
-              readonly property var rowSides: Model.sides(modelData, root.teamId)
-              readonly property string rowOpponent: rowSides ? Model.plainText(rowSides.them.name) : ""
-              readonly property string rowBadge: Model.opponentBadge(modelData, root.teamId)
-
-              Image {
-                anchors.verticalCenter: parent.verticalCenter
-                width: status === Image.Ready ? Style.space(16) : 0
-                height: width
-                fillMode: Image.PreserveAspectFit
-                asynchronous: true
-                cache: true
-                visible: status === Image.Ready
-                sourceSize.width: Style.space(32)
-                sourceSize.height: Style.space(32)
-                source: parent.rowBadge
-              }
-
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                width: body.width - Style.space(150)
-                elide: Text.ElideRight
-                textFormat: Text.PlainText
-                text: (parent.rowSides && parent.rowSides.atHome ? "vs " : "at ") + parent.rowOpponent
-                color: root.fg
-                font.family: root.fontFam
-                font.pixelSize: Style.font.bodySmall
-              }
-
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                horizontalAlignment: Text.AlignRight
-                textFormat: Text.PlainText
-                text: {
-                  var ko = Model.kickoffMs(parent.modelData)
-                  if (!isFinite(ko)) return ""
-                  return Qt.formatDateTime(new Date(ko), "ddd d MMM  HH:mm")
-                }
-                color: Qt.darker(root.fg, 1.4)
-                font.family: root.fontFam
-                font.pixelSize: Style.font.bodySmall
-              }
-            }
-          }
-
-          // Be straight about why this is empty. TheSportsDB's shared key
-          // returns exactly one upcoming fixture per team; the list needs a
-          // personal key, not a schedule that has not been published.
-          Text {
-            width: body.width
-            visible: root.laterFixtures.length === 0
-            wrapMode: Text.WordWrap
-            textFormat: Text.PlainText
-            text: "The shared TheSportsDB key returns only the next fixture. A personal key lists ten — set it with:  omarchy bar set tsubaie.next-match apiKey <key>"
-            color: Qt.darker(root.fg, 1.6)
-            font.family: root.fontFam
-            font.pixelSize: Style.font.caption
-            font.italic: true
           }
         }
 
