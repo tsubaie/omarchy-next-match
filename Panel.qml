@@ -667,6 +667,7 @@ Panel {
 
           Text {
             text: root.browseStage === "country" ? "Pick a country" : root.chosenCountry
+            textFormat: Text.PlainText
             color: root.fg
             font.family: root.fontFam
             font.pixelSize: Style.font.body
@@ -806,6 +807,7 @@ Panel {
             width: body.width
             visible: root.savedNote !== ""
             text: root.savedNote
+            textFormat: Text.PlainText
             color: Qt.darker(root.fg, 1.4)
             font.family: root.fontFam
             font.pixelSize: Style.font.bodySmall

@@ -176,13 +176,25 @@ eq(M.sdbSearchVariants("Arsenal"), ["Arsenal"], "no pointless duplicate")
 eq(M.sdbSearchVariants("  "), [], "blank")
 eq(M.sdbNextUrl("", 136013), "https://www.thesportsdb.com/api/v1/json/3/eventsnext.php?id=136013", "shared free key by default")
 eq(M.sdbNextUrl("mykey", 136013), "https://www.thesportsdb.com/api/v1/json/mykey/eventsnext.php?id=136013", "own key honoured")
+eq(M.sdbNextUrl('key"\nurl = "file:///tmp/x', 136013),
+   "https://www.thesportsdb.com/api/v1/json/key%22%0Aurl%20%3D%20%22file%3A%2F%2F%2Ftmp%2Fx/eventsnext.php?id=136013",
+   "key cannot inject curl config directives")
 eq(M.sdbLeagueTeamsUrl("", "Saudi-Arabian Pro League"),
    "https://www.thesportsdb.com/api/v1/json/3/search_all_teams.php?l=Saudi-Arabian%20Pro%20League", "league browse url")
 eq(M.sdbTeams({ teams: [{ idTeam: "136013", strTeam: "Al-Hilal", strCountry: "Saudi Arabia",
-                          strLeague: "Pro League", strBadge: "https://x/b.png" }] }),
-   [{ id: 136013, name: "Al-Hilal", country: "Saudi Arabia", code: "Pro League", badge: "https://x/b.png" }],
+                          strLeague: "Pro League", strBadge: "https://r2.thesportsdb.com/images/b.png" }] }),
+   [{ id: 136013, name: "Al-Hilal", country: "Saudi Arabia", code: "Pro League", badge: "https://r2.thesportsdb.com/images/b.png" }],
    "search rows carry a badge")
 eq(M.sdbTeams({ teams: null }), [], "no teams")
+
+console.log("remote images")
+eq(M.sdbImageUrl("https://r2.thesportsdb.com/images/team.png"),
+   "https://r2.thesportsdb.com/images/team.png", "TheSportsDB HTTPS image accepted")
+eq(M.sdbImageUrl("https://www.thesportsdb.com/images/team.png"),
+   "https://www.thesportsdb.com/images/team.png", "root TheSportsDB host accepted")
+eq(M.sdbImageUrl("http://r2.thesportsdb.com/images/team.png"), "", "plaintext image rejected")
+eq(M.sdbImageUrl("file:///etc/passwd"), "", "local file image rejected")
+eq(M.sdbImageUrl("https://thesportsdb.com.evil.test/team.png"), "", "lookalike host rejected")
 
 console.log("sanitize")
 eq(M.plainText("<b>x</b>"), "bx/b", "markup stripped")

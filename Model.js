@@ -14,7 +14,19 @@
 var SDB_BASE = "https://www.thesportsdb.com/api/v1/json/"
 
 function sdbUrl(key, path) {
-  return SDB_BASE + (String(key || "").trim() || "3") + "/" + path
+  // The key becomes a URL path segment and the completed URL is later passed
+  // through curl's config syntax. Encoding it here prevents quotes/newlines in
+  // a crafted setting from becoming additional curl directives.
+  var segment = String(key || "").trim() || "3"
+  return SDB_BASE + encodeURIComponent(segment) + "/" + path
+}
+
+// Remote image fields are untrusted API data. Only TheSportsDB's HTTPS hosts
+// are useful here; rejecting other schemes prevents file:// reads and avoids
+// turning the desktop into a requester for arbitrary local/network resources.
+function sdbImageUrl(value) {
+  var url = String(value || "").trim()
+  return /^https:\/\/([a-z0-9-]+\.)*thesportsdb\.com(?:[\/:?#]|$)/i.test(url) ? url : ""
 }
 
 function sdbNextUrl(key, teamId) { return sdbUrl(key, "eventsnext.php?id=" + teamId) }
@@ -102,11 +114,11 @@ function sdbToFixture(ev) {
     league: {
       name: String(ev.strLeague || ""),
       round: ev.intRound ? "Round " + ev.intRound : "",
-      logo: String(ev.strLeagueBadge || "")
+      logo: sdbImageUrl(ev.strLeagueBadge)
     },
     badges: {
-      home: String(ev.strHomeTeamBadge || ""),
-      away: String(ev.strAwayTeamBadge || "")
+      home: sdbImageUrl(ev.strHomeTeamBadge),
+      away: sdbImageUrl(ev.strAwayTeamBadge)
     }
   }
 }
@@ -136,7 +148,7 @@ function sdbTeams(payload) {
       name: String(t.strTeam || ""),
       country: String(t.strCountry || ""),
       code: String(t.strLeague || ""),
-      badge: String(t.strBadge || "")
+      badge: sdbImageUrl(t.strBadge)
     })
   }
   return out
@@ -168,8 +180,8 @@ function sdbLiveForTeam(payload, teamId) {
       goals: { home: sdbInt(r.intHomeScore), away: sdbInt(r.intAwayScore) },
       league: { name: String(r.strLeague || ""), round: "", logo: "" },
       badges: {
-        home: String(r.strHomeTeamBadge || ""),
-        away: String(r.strAwayTeamBadge || "")
+        home: sdbImageUrl(r.strHomeTeamBadge),
+        away: sdbImageUrl(r.strAwayTeamBadge)
       },
       live: true
     }
@@ -248,7 +260,7 @@ function sdbLeagues(payload) {
   for (var i = 0; i < rows.length; ++i) {
     var r = rows[i]
     if (!r || !r.strLeague) continue
-    out.push({ id: sdbInt(r.idLeague), name: String(r.strLeague), badge: String(r.strBadge || "") })
+    out.push({ id: sdbInt(r.idLeague), name: String(r.strLeague), badge: sdbImageUrl(r.strBadge) })
   }
   return out
 }
@@ -589,6 +601,7 @@ function validTeamId(value) {
 if (typeof module !== "undefined") {
   module.exports = {
     sdbUrl: sdbUrl,
+    sdbImageUrl: sdbImageUrl,
     sdbNextUrl: sdbNextUrl,
     sdbSearchUrl: sdbSearchUrl,
     sdbLeagueTeamsUrl: sdbLeagueTeamsUrl,
