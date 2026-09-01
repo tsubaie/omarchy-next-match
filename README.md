@@ -3,18 +3,40 @@
 **Your team's next fixture in the bar, with both crests, counting down to
 kick-off.**
 
+<img src="docs/bar.png" alt="Al-Hilal v Al-Ahli, Today 09:00 PM, in the Omarchy bar" width="386">
+
 A bar widget for the [Omarchy](https://omarchy.org) shell. Pick your club and
 it just runs — **no API key, no account, nothing to paste.** Data comes from
 [TheSportsDB](https://www.thesportsdb.com), which is free and covers leagues
 the big providers put behind paid plans, the Saudi Pro League among them.
 
+## Install
+
+```bash
+omarchy plugin add https://github.com/tsubaie/omarchy-next-match.git --enable
+```
+
+Click the pill, pick a **country**, then pick your **club**. That is the whole
+setup — no key, no account, nothing to paste.
+
+**How the club list is built.** TheSportsDB's shared key returns only ten clubs
+per request, so one country-wide call is not enough: for Saudi Arabia it stops
+at Al-Bukiryah, offering "Al Hilal Women" but not Al-Hilal. The list is
+gathered from that country's competitions instead — ten each rather than ten in
+total — which comes to about twenty clubs, the ones anyone is actually looking
+for among them. Every row shows its competition, so a club and its women's side
+are told apart.
+
+If a club is still missing, type three letters and the widget searches by name
+and folds the result in. Matching ignores punctuation, case and accents in
+every direction, which matters more than it sounds: TheSportsDB stores
+`Al-Nassr` but answers a search for `Al Nassr`, and a search for `nass` returns
+`Nässjö`. Results stay inside the country you picked; when the only matches are
+elsewhere the widget says exactly that, rather than a blank list.
+
 ## What it shows
 
-In the bar, both clubs with their crests and how long you have to wait:
-
-```
-  [crest] Al-Hilal v Al-Ahli [crest]   in 2h
-```
+In the bar, both clubs with their crests and how long you have to wait.
 
 Inside a week you get the slot itself, because that is what you plan around.
 Past a week the exact time stops mattering and a distance reads better:
@@ -31,6 +53,8 @@ Past a week the exact time stops mattering and a distance reads better:
 Click it for the fixture in full — competition and round, both crests and
 names, kick-off in your local time, venue, home or away. Middle click forces a
 refresh.
+
+<img src="docs/panel.png" alt="The panel: Saudi-Arabian Pro League, Round 3, Al-Hilal v Al-Ahli with crests, Tuesday 1 September 09:00 PM, Kingdom Arena, Home" width="457">
 
 ### Which competitions
 
