@@ -28,17 +28,40 @@ forces a refresh.
 omarchy plugin add https://github.com/tsubaie/omarchy-next-match.git --enable
 ```
 
-Then set two things in the widget's settings — Omarchy generates the form from
-the plugin manifest, so they are in the bar settings under **Next Match**:
+Then set two values. **Omarchy 4 has no settings form for third-party bar
+widgets yet** — the `schema` in `manifest.json` describes the fields for
+whenever one arrives, but nothing renders it today, so settings are set from
+the command line with `omarchy bar set`. That writes through the running shell,
+so the change applies immediately and a symlinked `shell.json` stays a symlink.
 
-- **API key** — from [dashboard.api-football.com](https://dashboard.api-football.com/profile?access)
-- **Team ID** — the numeric id of your team
+**Team id** — see [Finding your team id](#finding-your-team-id) below:
+
+```bash
+omarchy bar set tsubaie.next-match teamId 40 --json
+```
+
+**API key** — do not pass the key as an argument. It would be saved in your
+shell history and be briefly visible in `ps` to anyone else on the machine.
+Read it without echoing, put it in a file only you can read, and point the
+widget at the file:
+
+```bash
+read -rsp 'api-football key: ' k && echo
+install -m 600 /dev/null ~/.config/omarchy/next-match.key
+printf %s "$k" > ~/.config/omarchy/next-match.key && unset k
+omarchy bar set tsubaie.next-match apiKey 'file:~/.config/omarchy/next-match.key'
+```
+
+If you would rather keep it inline in `shell.json` and do not mind it in your
+history, `omarchy bar set tsubaie.next-match apiKey 'your-key'` works too.
 
 ### Finding your team id
 
 ```bash
 ~/.config/omarchy/plugins/tsubaie.next-match/scripts/find-team liverpool
 ```
+
+(If you have not set the key yet, it prompts for one without echoing it.)
 
 ```
 ID        TEAM                              CODE  COUNTRY
@@ -95,6 +118,10 @@ request, and a refresh that arrives within a minute of the last one is ignored
 to survive reload storms.
 
 ## Settings
+
+All of these are set with `omarchy bar set tsubaie.next-match <key> <value>`
+(add `--json` for numbers and booleans, so they are written as JSON types
+rather than strings).
 
 | Key | Default | Meaning |
 |-----|---------|---------|
