@@ -138,5 +138,35 @@ eq(M.keyIsSecret("abc123"), true, "pasted key is masked")
 eq(M.keyIsSecret("file:~/x"), false, "file ref is not a secret")
 eq(M.keyIsSecret("env:FOO"), false, "env ref is not a secret")
 
+// ---- query modes and free-plan fallback
+console.log("\nquery modes")
+eq(M.nextQueryMode("next"), "range", "next falls back to range")
+eq(M.nextQueryMode("range"), "season", "range falls back to season")
+eq(M.nextQueryMode("season"), "", "season is the last resort")
+eq(M.seasonFor(Date.parse("2026-09-01T00:00:00Z")), 2026, "September is the new season")
+eq(M.seasonFor(Date.parse("2026-03-01T00:00:00Z")), 2025, "March still belongs to last year's season")
+eq(M.isoDate(Date.parse("2026-09-01T22:00:00Z")), "2026-09-01", "iso date in UTC")
+eq(M.fixtureUrl(40, "next", NOW), "https://v3.football.api-sports.io/fixtures?team=40&next=1", "next url")
+eq(M.fixtureUrl(40, "season", NOW), "https://v3.football.api-sports.io/fixtures?team=40&season=2026", "season url")
+
+console.log("plan refusal detection")
+eq(M.isPlanRefusal({ errors: { plan: "This parameter is not available for your plan" } }), true, "plan wording")
+eq(M.isPlanRefusal({ errors: { access: "upgrade your subscription" } }), true, "upgrade wording")
+eq(M.isPlanRefusal({ errors: { token: "Missing application key" } }), false, "a key problem is not a plan problem")
+eq(M.isPlanRefusal({ errors: [] }), false, "success is not a refusal")
+
+console.log("pickNextFixture")
+{
+  const far = fixture({ fixture: { timestamp: (NOW + 10 * DAY) / 1000, status: { short: "NS" } } })
+  const soon = fixture({ fixture: { timestamp: (NOW + 2 * DAY) / 1000, status: { short: "NS" } } })
+  const done = fixture({ fixture: { timestamp: (NOW - 5 * DAY) / 1000, status: { short: "FT" } } })
+  const live = fixture({ fixture: { timestamp: (NOW - HOUR) / 1000, status: { short: "2H", elapsed: 60 } } })
+  eq(M.kickoffMs(M.pickNextFixture({ response: [far, soon, done] }, NOW)), M.kickoffMs(soon), "earliest upcoming wins")
+  eq(M.pickNextFixture({ response: [done] }, NOW), null, "only finished -> nothing")
+  eq(M.kickoffMs(M.pickNextFixture({ response: [far, live] }, NOW)), M.kickoffMs(live), "a running match beats a future one")
+  eq(M.pickNextFixture({ response: [] }, NOW), null, "empty season")
+  eq(M.kickoffMs(M.pickNextFixture({ response: [soon] }, NOW)), M.kickoffMs(soon), "single result from next=1")
+}
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

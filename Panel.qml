@@ -33,6 +33,11 @@ Panel {
     return isFinite(n) && n >= 15 ? n : 60
   }
 
+  // Which fixture query this account is allowed to use. Discovered once on a
+  // plan refusal and then remembered, so the fallback costs at most a couple of
+  // extra requests in the widget's lifetime rather than on every poll.
+  readonly property string queryMode: String(root.setting("queryMode", "next"))
+
   readonly property bool hasKey: keySpec.mode !== "none"
   readonly property bool configured: hasKey && teamId > 0
 
@@ -52,7 +57,10 @@ Panel {
   readonly property bool needsAttention: !configured || errorText !== ""
 
   readonly property string cachePath: Quickshell.env("HOME") + "/.cache/omarchy-next-match/fixture.json"
-  readonly property string fetchUrl: "https://v3.football.api-sports.io/fixtures?team=" + teamId + "&next=1"
+  // Resolved when a fetch starts rather than bound: `range` embeds today's
+  // date, and a binding on the ticking clock would rewrite the command line
+  // every 30 seconds.
+  property string fetchUrl: ""
 
   readonly property var whenParts: {
     var ko = Model.kickoffMs(root.fixture)
@@ -90,11 +98,25 @@ Panel {
     // budget: ignore anything that comes back inside a minute unless a human
     // asked for it.
     if (!force && root.lastFetchMs > 0 && Date.now() - root.lastFetchMs < 60000) return
+    root.fetchUrl = Model.fixtureUrl(root.teamId, root.queryMode, Date.now())
     root.fetching = true
     fetchProc.running = true
   }
 
   function applyPayload(payload, fromCache) {
+    // The free plan refuses `next`. That is not a user error: try the next
+    // query shape, remember it, and say nothing.
+    if (!fromCache && Model.isPlanRefusal(payload)) {
+      var fallback = Model.nextQueryMode(root.queryMode)
+      if (fallback !== "") {
+        persistSettings({ queryMode: fallback })
+        Qt.callLater(function() { root.refresh(true) })
+        return
+      }
+      root.errorText = "Your plan cannot read fixtures"
+      return
+    }
+
     var err = Model.apiError(payload)
     if (err !== "") {
       root.errorText = err
@@ -103,7 +125,7 @@ Panel {
       return
     }
     root.errorText = ""
-    root.fixture = Model.firstFixture(payload)
+    root.fixture = Model.pickNextFixture(payload, Date.now())
     if (!fromCache) root.lastFetchMs = Date.now()
     if (payload && payload.paging !== undefined && payload.results !== undefined)
       root.quotaText = ""

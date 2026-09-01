@@ -202,6 +202,75 @@ function keyResolverScript(spec) {
   return 'printf %s "$NM_KEY"'
 }
 
+// ------------------------------------------------------------- fixture queries
+
+// The free plan does not accept `next`, so the widget has more than one way to
+// ask the same question and remembers which one the account is allowed to use.
+//   next   — one request, exactly the next fixture. Paid plans.
+//   range  — this season plus a date window, filtered here.
+//   season — the whole season, filtered here. The last resort: biggest payload,
+//            but it is the query most plans allow.
+var QUERY_MODES = ["next", "range", "season"]
+
+function nextQueryMode(mode) {
+  var i = QUERY_MODES.indexOf(String(mode || "next"))
+  return i < 0 || i + 1 >= QUERY_MODES.length ? "" : QUERY_MODES[i + 1]
+}
+
+function isoDate(ms) {
+  var d = new Date(ms)
+  function pad(n) { return (n < 10 ? "0" : "") + n }
+  return d.getUTCFullYear() + "-" + pad(d.getUTCMonth() + 1) + "-" + pad(d.getUTCDate())
+}
+
+// api-football labels a season by the calendar year it starts in, and European
+// seasons start in August. Before then, the current season is last year's.
+function seasonFor(ms) {
+  var d = new Date(ms)
+  return d.getUTCMonth() >= 6 ? d.getUTCFullYear() : d.getUTCFullYear() - 1
+}
+
+function fixtureUrl(teamId, mode, nowMs, windowDays) {
+  var base = "https://v3.football.api-sports.io/fixtures?team=" + teamId
+  var days = windowDays === undefined ? 120 : windowDays
+  if (mode === "range")
+    return base + "&season=" + seasonFor(nowMs) +
+      "&from=" + isoDate(nowMs) + "&to=" + isoDate(nowMs + days * 86400000)
+  if (mode === "season") return base + "&season=" + seasonFor(nowMs)
+  return base + "&next=1"
+}
+
+// True when the API refused the query itself rather than the key, which is the
+// signal to try the next mode instead of showing the user an error.
+function isPlanRefusal(payload) {
+  if (!payload || typeof payload !== "object") return false
+  var e = payload.errors
+  if (!e || Array.isArray(e)) return false
+  var text = ""
+  for (var k in e) text += " " + k + " " + String(e[k])
+  return /plan|subscription|upgrade|not allowed|access|parameter/i.test(text)
+}
+
+// From any of the query shapes, the fixture that is on now or soonest next.
+// A match already running still has a kick-off in the past, so the window
+// reaches back far enough to keep one rather than skip to the following game.
+function pickNextFixture(payload, nowMs) {
+  if (!payload || !Array.isArray(payload.response)) return null
+  var candidates = []
+  for (var i = 0; i < payload.response.length; ++i) {
+    var fx = payload.response[i]
+    var ko = kickoffMs(fx)
+    if (!isFinite(ko)) continue
+    var state = matchState(fx)
+    if (state === "live") return fx
+    if (state === "finished" || state === "off") continue
+    if (ko >= nowMs - 3 * 3600 * 1000) candidates.push({ fx: fx, ko: ko })
+  }
+  if (candidates.length === 0) return null
+  candidates.sort(function(a, b) { return a.ko - b.ko })
+  return candidates[0].fx
+}
+
 // ---------------------------------------------------------------- team search
 
 // api-football rejects a search shorter than 3 characters, so the UI can say
@@ -265,6 +334,12 @@ if (typeof module !== "undefined") {
     refreshMinutes: refreshMinutes,
     parseKeySpec: parseKeySpec,
     keyResolverScript: keyResolverScript,
+    nextQueryMode: nextQueryMode,
+    isoDate: isoDate,
+    seasonFor: seasonFor,
+    fixtureUrl: fixtureUrl,
+    isPlanRefusal: isPlanRefusal,
+    pickNextFixture: pickNextFixture,
     searchValid: searchValid,
     teamsUrl: teamsUrl,
     parseTeams: parseTeams,

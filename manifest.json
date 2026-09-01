@@ -21,7 +21,8 @@
     "defaults": {
       "icon": "⚽",
       "refreshMinutes": 60,
-      "showLive": true
+      "showLive": true,
+      "queryMode": "next"
     },
     "schema": [
       {
@@ -71,6 +72,18 @@
         "label": "Hide when nothing is scheduled",
         "defaultValue": false,
         "description": "Off-season and international breaks leave no fixture to show. On, the widget takes no space at all until one appears, rather than sitting there saying so."
+      },
+      {
+        "key": "queryMode",
+        "type": "enum",
+        "label": "Fixture query",
+        "options": [
+          "next",
+          "range",
+          "season"
+        ],
+        "defaultValue": "next",
+        "description": "How the next fixture is asked for. 'next' is one request and exactly the right answer, but the free plan does not accept it. The widget detects that refusal on its own and drops to 'range' (this season plus a date window) and then 'season' (the whole season, filtered locally), remembering what worked — so you should not need to touch this. Set it by hand only to pin a mode."
       }
     ]
   }

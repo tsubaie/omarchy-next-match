@@ -95,6 +95,31 @@ stdin and reaches the request from the process environment. It is never an
 argument to anything, so it does not show up in `ps` for other users on the
 machine.
 
+## Free plan: the `next` parameter
+
+api-football's free plan **rejects the `next` parameter**, which is the obvious
+way to ask for one upcoming fixture. The widget does not require you to know or
+care: it asks the best way first, and when the API refuses the query — as
+opposed to refusing your key — it drops to the next shape and remembers what
+worked.
+
+| Mode | Query | Notes |
+|------|-------|-------|
+| `next` | `?team=X&next=1` | One request, exact answer. Paid plans. |
+| `range` | `?team=X&season=…&from=…&to=…` | This season within a 120-day window, filtered locally. |
+| `season` | `?team=X&season=…` | Whole season, filtered locally. Biggest payload, widest support. |
+
+The working mode is saved as `queryMode`, so the fallback costs a couple of
+extra requests once, not on every poll. To see exactly what your account
+allows:
+
+```bash
+~/.config/omarchy/plugins/tsubaie.next-match/scripts/plan-probe
+```
+
+It prints your plan, your request count, which of the queries above succeed,
+and which seasons your key can see.
+
 ## Staying inside the free plan
 
 The free api-football plan allows **100 requests a day**, reset at 00:00 UTC.
