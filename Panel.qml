@@ -42,7 +42,12 @@ Panel {
 
   // --------------------------------------------------------------------- state
 
+  // The scheduled fixture, and — while one is being played — the live feed's
+  // version of it. Display reads `displayFixture`; pacing and the "then" list
+  // read `fixture`, which is the schedule.
   property var fixture: null
+  property var liveFixture: null
+  readonly property var displayFixture: root.liveFixture ? root.liveFixture : root.fixture
   property string errorText: ""
   property double lastFetchMs: 0
   property bool fetching: false
@@ -59,20 +64,20 @@ Panel {
   readonly property string cachePath: Quickshell.env("HOME") + "/.cache/omarchy-next-match/fixture.json"
   property string fetchUrl: ""
 
-  readonly property string badgeUrl: root.showBadge ? Model.opponentBadge(root.fixture, root.teamId) : ""
+  readonly property string badgeUrl: root.showBadge ? Model.opponentBadge(root.displayFixture, root.teamId) : ""
 
   // The bar draws both clubs, so it needs the parts rather than one string:
   // a crest cannot be interleaved into a Text.
   readonly property string homeName: root.sidesNow ? Model.plainText(root.sidesNow.home.name) : ""
   readonly property string awayName: root.sidesNow ? Model.plainText(root.sidesNow.away.name) : ""
-  readonly property string homeBadgeUrl: root.showBadge && root.fixture && root.fixture.badges ? root.fixture.badges.home : ""
-  readonly property string awayBadgeUrl: root.showBadge && root.fixture && root.fixture.badges ? root.fixture.badges.away : ""
+  readonly property string homeBadgeUrl: root.showBadge && root.displayFixture && root.displayFixture.badges ? root.displayFixture.badges.home : ""
+  readonly property string awayBadgeUrl: root.showBadge && root.displayFixture && root.displayFixture.badges ? root.displayFixture.badges.away : ""
 
   // "v" normally; the scoreline once it is being played.
   readonly property string barMiddle: {
-    if (!root.fixture) return ""
-    if (Model.matchState(root.fixture) === "live" && root.showLive) {
-      var g = root.fixture.goals || {}
+    if (!root.displayFixture) return ""
+    if (Model.matchState(root.displayFixture) === "live" && root.showLive) {
+      var g = root.displayFixture.goals || {}
       var h = g.home === null || g.home === undefined ? 0 : g.home
       var a = g.away === null || g.away === undefined ? 0 : g.away
       return h + " - " + a
@@ -82,15 +87,15 @@ Panel {
 
   // The clock or the countdown that trails the two clubs.
   readonly property string barTrailing: {
-    if (!root.fixture) return ""
-    var state = Model.matchState(root.fixture)
+    if (!root.displayFixture) return ""
+    var state = Model.matchState(root.displayFixture)
     if (state === "live" && root.showLive) {
-      if (Model.statusShort(root.fixture) === "HT") return "HT"
-      var el = root.fixture.fixture.status.elapsed
+      if (Model.statusShort(root.displayFixture) === "HT") return "HT"
+      var el = root.displayFixture.fixture.status.elapsed
       return el ? el + "'" : "live"
     }
     if (state === "off") return "postponed"
-    var ko = Model.kickoffMs(root.fixture)
+    var ko = Model.kickoffMs(root.displayFixture)
     var delta = ko - root.nowMs
     if (!isFinite(delta)) return ""
     if (delta <= 0) return "kick-off"
@@ -102,7 +107,7 @@ Panel {
   property var laterFixtures: []
 
   readonly property var whenParts: {
-    var ko = Model.kickoffMs(root.fixture)
+    var ko = Model.kickoffMs(root.displayFixture)
     if (!isFinite(ko)) return null
     var d = new Date(ko)
     return { weekday: Qt.formatDateTime(d, "ddd"), time: Qt.formatDateTime(d, "HH:mm") }
@@ -111,8 +116,8 @@ Panel {
   readonly property string pillLabel: {
     if (teamId <= 0) return "Pick a team"
     if (errorText !== "") return errorText
-    if (fixture === null) return lastFetchMs === 0 ? "…" : "No match"
-    return Model.pillLabel(root.fixture, root.nowMs, {
+    if (displayFixture === null) return lastFetchMs === 0 ? "…" : "No match"
+    return Model.pillLabel(root.displayFixture, root.nowMs, {
       teamId: root.teamId,
       showLive: root.showLive,
       when: root.whenParts
@@ -122,8 +127,8 @@ Panel {
   readonly property string tooltip: {
     if (!configured) return "Next Match — click to pick a team"
     if (errorText !== "") return "Next Match — " + errorText
-    if (!fixture) return "Next Match — nothing scheduled"
-    var s = Model.sides(root.fixture, root.teamId)
+    if (!displayFixture) return "Next Match — nothing scheduled"
+    var s = Model.sides(root.displayFixture, root.teamId)
     return s ? s.home.name + " v " + s.away.name : "Next Match"
   }
 
@@ -181,6 +186,31 @@ Panel {
     }
   }
 
+  function pollLive() {
+    if (!root.showLive || liveProc.running) return
+    root.liveUrl = Model.sdbLiveUrl(root.sdbKey)
+    liveProc.running = true
+  }
+
+  property string liveUrl: ""
+
+  function onLive(raw) {
+    var text = String(raw || "").trim()
+    if (text === "") return
+    try {
+      var found = Model.sdbLiveForTeam(JSON.parse(text), root.teamId)
+      root.liveFixture = found
+      // The match has dropped off the live feed, so it is over: ask the
+      // schedule for whatever is next rather than showing a stale scoreline.
+      if (!found && root.fixture && Model.matchState(root.fixture) !== "live") {
+        var ko = Model.kickoffMs(root.fixture)
+        if (isFinite(ko) && Date.now() > ko + 2 * 3600 * 1000) root.refresh(true)
+      }
+    } catch (e) {
+      // A malformed live feed just leaves the scheduled fixture showing.
+    }
+  }
+
   function scheduleNext() {
     var mins = Model.refreshMinutes(root.fixture, root.nowMs, root.baseMinutes, root.showLive)
     refreshTimer.interval = Math.max(60000, mins * 60000)
@@ -188,7 +218,13 @@ Panel {
   }
 
   onConfiguredChanged: if (configured) refresh(true)
-  onTeamIdChanged: { root.fixture = null; root.laterFixtures = []; root.errorText = ""; if (configured) refresh(true) }
+  onTeamIdChanged: {
+    root.fixture = null
+    root.liveFixture = null
+    root.laterFixtures = []
+    root.errorText = ""
+    if (configured) refresh(true)
+  }
 
   Component.onCompleted: {
     cacheFile.reload()
@@ -204,6 +240,17 @@ Panel {
     running: true
     repeat: true
     onTriggered: root.nowMs = Date.now()
+  }
+
+  // While a match is on, `eventsnext` has nothing to say about it — it lists
+  // only fixtures that have not started — so the live feed is polled instead.
+  Timer {
+    id: liveTimer
+    interval: 180000
+    repeat: true
+    running: root.showLive && root.configured && Model.liveWindow(root.fixture, root.nowMs)
+    triggeredOnStart: true
+    onTriggered: root.pollLive()
   }
 
   Timer {
@@ -257,80 +304,105 @@ Panel {
   readonly property bool settingsOpen: showSettings || !configured
 
   property string savedNote: ""
-  property var searchResults: []
-  property string searchNote: ""
-  property bool searching: false
-  property var searchQueue: []
 
-  function persistSettings(values) {
-    var entry = { id: root.moduleName }
-    for (var existing in root.settings) if (existing !== "id") entry[existing] = root.settings[existing]
-    for (var key in values) entry[key] = values[key]
+  // Picking a club by typing its name does not work reliably: TheSportsDB
+  // matches an alternate-names field, so "Al-Hilal" finds nothing where
+  // "Al Hilal SFC" finds it. Browsing does work, and it is also how you find a
+  // club whose exact name you do not know — so the picker walks
+  // country -> league -> club, with a filter box at each step.
+  property string browseStage: "country"     // country | league | team
+  property string chosenCountry: ""
+  property string chosenLeague: ""
+  property var countryList: []
+  property var leagueList: []
+  property var teamList: []
+  property string browseNote: ""
+  property bool browsing: false
+  property string browseUrl: ""
+  property string browseKind: ""
 
-    root.settings = entry
-    if (root.hostWidget && "settings" in root.hostWidget) root.hostWidget.settings = entry
-    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
-      root.bar.shell.updateEntryInline(root.moduleName, entry)
+  readonly property var visibleRows: {
+    var q = String(filterField.text).trim().toLowerCase()
+    var src = root.browseStage === "country" ? root.countryList
+            : (root.browseStage === "league" ? root.leagueList : root.teamList)
+    if (q === "") return src
+    var out = []
+    for (var i = 0; i < src.length; ++i) {
+      var name = String(src[i].name || "").toLowerCase()
+      if (name.indexOf(q) !== -1) out.push(src[i])
+    }
+    return out
+  }
+
+  function startBrowse() {
+    root.browseStage = "country"
+    root.chosenCountry = ""
+    root.chosenLeague = ""
+    root.leagueList = []
+    root.teamList = []
+    filterField.text = ""
+    if (root.countryList.length === 0) fetchBrowse("country", Model.sdbCountriesUrl(root.sdbKey))
+    else root.browseNote = ""
+  }
+
+  function fetchBrowse(kind, url) {
+    if (browseProc.running) return
+    root.browseKind = kind
+    root.browseUrl = url
+    root.browseNote = "Loading…"
+    root.browsing = true
+    browseProc.running = true
+  }
+
+  function chooseCountry(name) {
+    root.chosenCountry = name
+    root.browseStage = "league"
+    root.leagueList = []
+    filterField.text = ""
+    fetchBrowse("league", Model.sdbLeaguesUrl(root.sdbKey, name))
+  }
+
+  function chooseLeague(name) {
+    root.chosenLeague = name
+    root.browseStage = "team"
+    root.teamList = []
+    filterField.text = ""
+    fetchBrowse("team", Model.sdbLeagueTeamsUrl(root.sdbKey, name))
+  }
+
+  function browseBack() {
+    filterField.text = ""
+    if (root.browseStage === "team") { root.browseStage = "league"; root.browseNote = "" }
+    else if (root.browseStage === "league") { root.browseStage = "country"; root.browseNote = "" }
+  }
+
+  function onBrowsed(raw) {
+    root.browsing = false
+    var text = String(raw || "").trim()
+    var payload = null
+    if (text !== "") { try { payload = JSON.parse(text) } catch (e) { payload = null } }
+    if (!payload) { root.browseNote = "Could not load — check your connection"; return }
+
+    if (root.browseKind === "country") {
+      root.countryList = Model.sdbCountries(payload)
+      root.browseNote = root.countryList.length === 0 ? "No countries returned" : ""
+    } else if (root.browseKind === "league") {
+      root.leagueList = Model.sdbLeagues(payload)
+      root.browseNote = root.leagueList.length === 0 ? "No football leagues listed for " + root.chosenCountry : ""
+    } else {
+      root.teamList = Model.sdbTeams(payload)
+      root.browseNote = root.teamList.length === 0 ? "No clubs listed for " + root.chosenLeague : ""
+    }
   }
 
   function pickTeam(id, name) {
-    root.searchResults = []
-    root.searchQueue = []
-    root.searchNote = ""
-    searchField.text = ""
+    root.browseNote = ""
+    filterField.text = ""
     root.savedNote = "Now following " + name
     savedNoteTimer.restart()
     root.errorText = ""
     persistSettings({ teamId: id })
     root.showSettings = false
-  }
-
-  // TheSportsDB's club search misses on punctuation and is inconsistent about
-  // alternate names, so one query is not enough: try the name, then the name
-  // with punctuation loosened, then the same text as a league to browse. The
-  // first that returns anything wins.
-  function searchTeams() {
-    var q = String(searchField.text).trim()
-    if (!Model.searchValid(q)) { root.searchNote = "Type at least 3 characters"; return }
-    if (searchProc.running) return
-
-    var queue = []
-    var variants = Model.sdbSearchVariants(q)
-    for (var i = 0; i < variants.length; ++i)
-      queue.push(Model.sdbSearchUrl(root.sdbKey, variants[i]))
-    queue.push(Model.sdbLeagueTeamsUrl(root.sdbKey, q))
-
-    root.searchQueue = queue
-    root.searchResults = []
-    root.searchNote = "Searching…"
-    root.searching = true
-    runNextSearch()
-  }
-
-  function runNextSearch() {
-    if (root.searchQueue.length === 0) {
-      root.searching = false
-      root.searchNote = "Nothing matched. Try the full club name, or a league name to browse it."
-      return
-    }
-    var queue = root.searchQueue.slice()
-    root.searchUrl = queue.shift()
-    root.searchQueue = queue
-    searchProc.running = true
-  }
-
-  property string searchUrl: ""
-
-  function onSearched(raw) {
-    var text = String(raw || "").trim()
-    var teams = []
-    if (text !== "") {
-      try { teams = Model.sdbTeams(JSON.parse(text)) } catch (e) { teams = [] }
-    }
-    if (teams.length === 0) { runNextSearch(); return }
-    root.searching = false
-    root.searchResults = teams
-    root.searchNote = ""
   }
 
   Timer {
@@ -340,15 +412,27 @@ Panel {
   }
 
   Process {
-    id: searchProc
+    id: liveProc
     running: false
     command: ["bash", "-c", 'printf \'url = "%s"\\n\' "$NM_URL" | curl -fsS --max-time 20 -K -']
-    environment: ({ "NM_URL": root.searchUrl })
+    environment: ({ "NM_URL": root.liveUrl })
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.onSearched(text)
+      onStreamFinished: root.onLive(text)
     }
   }
+
+  Process {
+    id: browseProc
+    running: false
+    command: ["bash", "-c", 'printf \'url = "%s"\\n\' "$NM_URL" | curl -fsS --max-time 25 -K -']
+    environment: ({ "NM_URL": root.browseUrl })
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.onBrowsed(text)
+    }
+  }
+
 
   // -------------------------------------------------------------- panel plumbing
 
@@ -373,13 +457,13 @@ Panel {
     return false
   }
 
-  onOpenedChanged: if (opened) searchField.text = ""
+  onOpenedChanged: if (opened && settingsOpen) startBrowse()
 
   // ------------------------------------------------------------------- the popup
 
   readonly property color fg: root.bar ? root.bar.barForeground : Color.foreground
   readonly property string fontFam: root.bar ? root.bar.fontFamily : Style.font.family
-  readonly property var sidesNow: Model.sides(root.fixture, root.teamId)
+  readonly property var sidesNow: Model.sides(root.displayFixture, root.teamId)
 
   KeyboardPanel {
     id: panel
@@ -402,74 +486,93 @@ Panel {
         width: parent.width
         spacing: Style.space(10)
 
-        // ---- pick a team. Shown until the widget is usable, then on demand.
+        // ---- the picker: country, then league, then club. Shown until the
+        // widget is usable, then from the "Change team" button.
         Column {
           width: parent.width
           spacing: Style.space(6)
           visible: root.settingsOpen
 
           Text {
-            text: root.configured ? "Change team" : "Pick your team"
+            text: root.browseStage === "country" ? "Pick a country"
+                : (root.browseStage === "league" ? root.chosenCountry : root.chosenLeague)
             color: root.fg
             font.family: root.fontFam
             font.pixelSize: Style.font.body
             font.bold: true
+            elide: Text.ElideRight
+            width: body.width
           }
 
           Row {
             width: parent.width
             spacing: Style.space(6)
 
-            TextField {
-              id: searchField
-              width: parent.width - searchBtn.width - Style.space(6)
-              placeholderText: "club or league name"
-              foreground: root.fg
-              font.family: root.fontFam
-              font.pixelSize: Style.font.bodySmall
-              onAccepted: root.searchTeams()
-            }
-
             Button {
-              id: searchBtn
-              text: root.searching ? "…" : "Search"
+              id: backBtn
+              visible: root.browseStage !== "country"
+              text: "‹ Back"
               bordered: true
               foreground: root.fg
               fontFamily: root.fontFam
               fontSize: Style.font.bodySmall
-              onClicked: root.searchTeams()
+              onClicked: root.browseBack()
+            }
+
+            TextField {
+              id: filterField
+              width: parent.width - (backBtn.visible ? backBtn.width + Style.space(6) : 0)
+              placeholderText: root.browseStage === "country" ? "filter countries"
+                             : (root.browseStage === "league" ? "filter leagues" : "filter clubs")
+              foreground: root.fg
+              font.family: root.fontFam
+              font.pixelSize: Style.font.bodySmall
             }
           }
 
           Text {
             width: body.width
-            visible: root.searchNote !== ""
+            visible: root.browseNote !== ""
             wrapMode: Text.WordWrap
             textFormat: Text.PlainText
-            text: root.searchNote
+            text: root.browseNote
             color: Qt.darker(root.fg, 1.5)
             font.family: root.fontFam
             font.pixelSize: Style.font.caption
           }
 
-          Column {
+          // The list is scrollable because a country list is 50 long and a
+          // league's clubs can be too, and the popup should not grow to the
+          // height of whichever one is showing.
+          Flickable {
             width: parent.width
-            spacing: Style.space(2)
+            height: Math.min(Style.space(210), rowsCol.implicitHeight)
+            contentHeight: rowsCol.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
 
-            Repeater {
-              model: root.searchResults
+            Column {
+              id: rowsCol
+              width: parent.width
+              spacing: Style.space(1)
 
-              Button {
-                required property var modelData
-                width: body.width
-                bordered: false
-                text: modelData.name
-                      + (modelData.country ? "  ·  " + modelData.country : "")
-                      + (modelData.code ? "  ·  " + modelData.code : "")
-                foreground: root.fg
-                fontFamily: root.fontFam
-                fontSize: Style.font.bodySmall
-                onClicked: root.pickTeam(modelData.id, modelData.name)
+              Repeater {
+                model: root.visibleRows
+
+                Button {
+                  required property var modelData
+                  width: body.width
+                  bordered: false
+                  text: modelData.name
+                  foreground: root.fg
+                  fontFamily: root.fontFam
+                  fontSize: Style.font.bodySmall
+                  onClicked: {
+                    if (root.browseStage === "country") root.chooseCountry(modelData.name)
+                    else if (root.browseStage === "league") root.chooseLeague(modelData.name)
+                    else root.pickTeam(modelData.id, modelData.name)
+                  }
+                }
               }
             }
           }
@@ -708,7 +811,8 @@ Panel {
             fontSize: Style.font.bodySmall
             onClicked: {
               root.showSettings = !root.showSettings
-              if (!root.showSettings) { root.searchResults = []; root.searchNote = "" }
+              if (root.showSettings) root.startBrowse()
+              else root.browseNote = ""
             }
           }
 

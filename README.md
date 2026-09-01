@@ -16,19 +16,30 @@ In the bar, both clubs with their crests and how long you have to wait:
   [crest] Al-Hilal v Al-Ahli [crest]   in 2h
 ```
 
-The trailing part adapts to how close the match is, because "Saturday" is the
-useful answer three days out and "in 12m" is the useful answer on the day:
+The trailing part is a countdown in the largest unit that still says something
+useful:
 
-| When | Trailing |
-|------|----------|
-| More than a day away | `Sat 18:30` |
-| Match day | `in 4h` |
-| Nearly kick-off | `in 12m` |
-| While it is on | the scoreline replaces the `v`, with `67'` |
+| Until kick-off | Trailing |
+|----------------|----------|
+| Months away | `in 3 months` |
+| Weeks | `in 3 weeks` |
+| Days | `in 5 days` |
+| Inside a day | `in 2:53` — a clock, because "2h" throws away fifty minutes |
+| Under an hour | `in 45 min` |
+| Being played | the score replaces the `v`, with the minute: `Al-Hilal 2 - 1 Al-Ahli 67'` |
 
 Click it for the fixture in full — competition and round, both crests and
 names, kick-off in your local time, venue, home or away — and under it the
 next three fixtures after that one. Middle click forces a refresh.
+
+### While the match is on
+
+`eventsnext` lists only fixtures that have **not** started, so a match drops out
+of it the moment it kicks off. Live scores come from a separate feed covering
+every soccer match being played, which the widget starts polling ten minutes
+before kick-off and stops once the match has left it. Nothing to configure;
+turn it off with `showLive` if you would rather not know before you watch it
+back.
 
 Early in a season only a round or two is published, so the list fills in as
 fixtures are announced rather than always holding three.
@@ -39,19 +50,17 @@ fixtures are announced rather than always holding three.
 omarchy plugin add https://github.com/tsubaie/omarchy-next-match.git --enable
 ```
 
-Click the pill, search your club by name, click it. That is the whole setup.
+Click the pill and walk **country → league → club**, with a filter box at each
+step. That is the whole setup.
+
+Browsing rather than typing is deliberate: TheSportsDB's club search matches an
+alternate-names field, so `Al-Hilal` returns nothing where `Al Hilal SFC` finds
+it. Picking from a list cannot miss, and it is also how you find a club whose
+exact name you do not know.
 
 Omarchy 4 renders no settings form for a third-party bar widget, so the plugin
 carries its own; it opens by itself until a team is picked, and from a "Change
 team" button afterwards.
-
-### If the search cannot find your club
-
-TheSportsDB matches against an alternate-names field, so punctuation throws it:
-`Al-Hilal` returns nothing where `Al Hilal SFC` finds it. The widget already
-retries with punctuation loosened, and then treats what you typed as a **league
-name** and lists that league's clubs — so typing `Saudi-Arabian Pro League`
-gets you there when the club name will not.
 
 ## Polling
 
@@ -64,7 +73,7 @@ by how soon the answer could actually change:
 | Next match more than a day away | 6 hours |
 | Same day | 1 hour |
 | Within an hour of kick-off | 15 minutes |
-| Match in progress (if live scores are on) | 5 minutes |
+| From 10 minutes before kick-off until the match ends | 3 minutes, against the live feed |
 
 A worst-case match day — a full day of polling, an hour of tightening, and a
 whole match streamed live — is about **50 requests**.

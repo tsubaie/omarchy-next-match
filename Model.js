@@ -136,6 +136,82 @@ function sdbTeams(payload) {
   return out
 }
 
+// TheSportsDB's `eventsnext` only lists fixtures that have not started, so a
+// match in progress disappears from it entirely. Live scores come from a
+// separate feed covering every soccer match currently being played; the one
+// that matters is picked out of it by team id.
+function sdbLiveUrl(key) { return sdbUrl(key, "livescore.php?s=Soccer") }
+
+function sdbLiveForTeam(payload, teamId) {
+  var rows = payload && Array.isArray(payload.livescore) ? payload.livescore : []
+  var id = parseInt(teamId, 10)
+  for (var i = 0; i < rows.length; ++i) {
+    var r = rows[i]
+    if (!r) continue
+    if (sdbInt(r.idHomeTeam) !== id && sdbInt(r.idAwayTeam) !== id) continue
+    return {
+      fixture: {
+        timestamp: Math.round(Date.now() / 1000),
+        status: { short: sdbStatus(r), elapsed: sdbInt(r.strProgress) },
+        venue: { name: "", city: "" }
+      },
+      teams: {
+        home: { id: sdbInt(r.idHomeTeam), name: String(r.strHomeTeam || "") },
+        away: { id: sdbInt(r.idAwayTeam), name: String(r.strAwayTeam || "") }
+      },
+      goals: { home: sdbInt(r.intHomeScore), away: sdbInt(r.intAwayScore) },
+      league: { name: String(r.strLeague || ""), round: "", logo: "" },
+      badges: {
+        home: String(r.strHomeTeamBadge || ""),
+        away: String(r.strAwayTeamBadge || "")
+      },
+      live: true
+    }
+  }
+  return null
+}
+
+// Worth asking the live feed at all? Only around a known kick-off: from just
+// before it until a match could not still be running.
+function liveWindow(fx, nowMs) {
+  if (!fx) return false
+  if (matchState(fx) === "live") return true
+  var ko = kickoffMs(fx)
+  if (!isFinite(ko)) return false
+  return nowMs >= ko - 10 * 60000 && nowMs <= ko + 3.5 * 3600 * 1000
+}
+
+// -------------------------------------------------------------- browse by place
+
+function sdbCountriesUrl(key) { return sdbUrl(key, "all_countries.php") }
+
+function sdbCountries(payload) {
+  var rows = payload && Array.isArray(payload.countries) ? payload.countries : []
+  var out = []
+  for (var i = 0; i < rows.length; ++i) {
+    var name = String((rows[i] && (rows[i].name_en || rows[i].strCountry)) || "").trim()
+    if (name) out.push({ name: name, flag: String((rows[i] && rows[i].flag_url_32) || "") })
+  }
+  out.sort(function(a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0) })
+  return out
+}
+
+function sdbLeaguesUrl(key, country) {
+  return sdbUrl(key, "search_all_leagues.php?c=" +
+    encodeURIComponent(String(country || "").trim()) + "&s=Soccer")
+}
+
+function sdbLeagues(payload) {
+  var rows = payload && Array.isArray(payload.countries) ? payload.countries : []
+  var out = []
+  for (var i = 0; i < rows.length; ++i) {
+    var r = rows[i]
+    if (!r || !r.strLeague) continue
+    out.push({ id: sdbInt(r.idLeague), name: String(r.strLeague), badge: String(r.strBadge || "") })
+  }
+  return out
+}
+
 // ------------------------------------------------------------------ match state
 
 var LIVE_STATUS = ["1H", "2H", "HT", "ET", "BT", "P", "LIVE", "INT", "SUSP"]
@@ -216,16 +292,33 @@ function opponentBadge(fx, teamId) {
 
 // -------------------------------------------------------------------- countdown
 
+// How long until kick-off, in the largest unit that still says something
+// useful: months and weeks while it is far off, days approaching, then a
+// clock once it is inside a day, because "2:50" is a wait you can picture
+// where "2h" rounds away fifty minutes of it.
 function countdown(ms) {
   if (!isFinite(ms) || ms <= 0) return "now"
+
   var mins = Math.floor(ms / 60000)
   if (mins < 1) return "now"
-  if (mins < 60) return mins + "m"
+  if (mins < 60) return mins + " min"
+
   var hours = Math.floor(mins / 60)
-  if (hours < 24) return hours + "h"
+  if (hours < 24) {
+    var rem = mins % 60
+    return hours + ":" + (rem < 10 ? "0" : "") + rem
+  }
+
   var days = Math.floor(hours / 24)
-  var rem = hours % 24
-  return rem > 0 ? days + "d " + rem + "h" : days + "d"
+  if (days < 7) return days + (days === 1 ? " day" : " days")
+
+  // Calendar months vary, so weeks carry the middle of the range and months
+  // only take over past roughly four of them.
+  var weeks = Math.floor(days / 7)
+  if (days < 30) return weeks + (weeks === 1 ? " week" : " weeks")
+
+  var months = Math.floor(days / 30)
+  return months + (months === 1 ? " month" : " months")
 }
 
 // Weekday + local time, e.g. "Sat 18:30". Built from the parts the caller
@@ -265,9 +358,6 @@ function pillLabel(fx, nowMs, opts) {
   // Once it has started but the API has not flipped the status yet, the
   // countdown would read "now" forever; say kick-off instead.
   if (delta <= 0) return (opts.atPrefix !== false ? (s.atHome ? "vs " : "at ") : "") + s.them.name + "  kick-off"
-
-  if (delta > 24 * 3600 * 1000)
-    return shortCode(s.them.name) + "  " + whenLabel(opts.when)
 
   return (s.atHome ? "vs " : "at ") + s.them.name + "  in " + countdown(delta)
 }
@@ -364,6 +454,13 @@ if (typeof module !== "undefined") {
     sdbNextUrl: sdbNextUrl,
     sdbSearchUrl: sdbSearchUrl,
     sdbLeagueTeamsUrl: sdbLeagueTeamsUrl,
+    sdbLiveUrl: sdbLiveUrl,
+    sdbLiveForTeam: sdbLiveForTeam,
+    liveWindow: liveWindow,
+    sdbCountriesUrl: sdbCountriesUrl,
+    sdbCountries: sdbCountries,
+    sdbLeaguesUrl: sdbLeaguesUrl,
+    sdbLeagues: sdbLeagues,
     sdbSearchVariants: sdbSearchVariants,
     sdbKickoffMs: sdbKickoffMs,
     sdbStatus: sdbStatus,

@@ -79,20 +79,31 @@ eq(M.sides(fx(), 137721).them.name, "Al-Hilal", "opponent when away")
 eq(M.sides(fx(), 999).them.name, "Al-Ahli", "an unknown id still renders a match")
 
 console.log("countdown")
-eq(M.countdown(12 * 60000), "12m", "minutes")
-eq(M.countdown(4 * HOUR), "4h", "hours")
-eq(M.countdown(3 * DAY + 4 * HOUR), "3d 4h", "days and hours")
-eq(M.countdown(2 * DAY), "2d", "whole days drop the hours")
+eq(M.countdown(30 * 1000), "now", "under a minute")
+eq(M.countdown(12 * 60000), "12 min", "minutes")
+eq(M.countdown(45 * 60000), "45 min", "still minutes at 45")
+// A clock, not a rounded hour: "2h" would throw away fifty minutes of waiting.
+eq(M.countdown(2 * HOUR + 50 * 60000), "2:50", "hours as a clock")
+eq(M.countdown(2 * HOUR + 5 * 60000), "2:05", "minutes zero-padded")
+eq(M.countdown(23 * HOUR), "23:00", "just under a day is still a clock")
+eq(M.countdown(36 * HOUR), "1 day", "singular day")
+eq(M.countdown(3 * DAY), "3 days", "days")
+eq(M.countdown(10 * DAY), "1 week", "singular week")
+eq(M.countdown(25 * DAY), "3 weeks", "weeks")
+eq(M.countdown(45 * DAY), "1 month", "singular month")
+eq(M.countdown(95 * DAY), "3 months", "months")
 eq(M.countdown(-5), "now", "past")
 
 console.log("pill (adaptive)")
 const when = { weekday: "Tue", time: "21:00" }
 eq(M.pillLabel(fx({ strTimestamp: "2026-09-05T18:00:00" }), NOW, { teamId: 136013, when }),
-   "AHL  Tue 21:00", "far away -> code + date")
-eq(M.pillLabel(fx(), NOW, { teamId: 136013, when }), "vs Al-Ahli  in 6h", "match day -> countdown, home")
+   "vs Al-Ahli  in 4 days", "days out -> a day count, not a bare date")
+eq(M.pillLabel(fx({ strTimestamp: "2026-11-05T18:00:00" }), NOW, { teamId: 136013, when }),
+   "vs Al-Ahli  in 2 months", "months out")
+eq(M.pillLabel(fx(), NOW, { teamId: 136013, when }), "vs Al-Ahli  in 6:00", "match day -> a clock")
 eq(M.pillLabel(fx({ strTimestamp: "2026-09-01T12:12:00" }), NOW, { teamId: 136013, when }),
-   "vs Al-Ahli  in 12m", "imminent")
-eq(M.pillLabel(fx(), NOW, { teamId: 137721, when }), "at Al-Hilal  in 6h", "away fixture says 'at'")
+   "vs Al-Ahli  in 12 min", "imminent")
+eq(M.pillLabel(fx(), NOW, { teamId: 137721, when }), "at Al-Hilal  in 6:00", "away fixture says 'at'")
 eq(M.pillLabel(fx({ strStatus: "2H", strProgress: "67", intHomeScore: "2", intAwayScore: "1",
                     strTimestamp: "2026-09-01T11:00:00" }), NOW, { teamId: 136013, when }),
    "HIL 2 - 1 AHL  67'", "live score")
@@ -144,6 +155,43 @@ eq(M.plainText("<b>x</b>"), "bx/b", "markup stripped")
 eq(M.validTeamId("136013"), 136013, "numeric string")
 eq(M.validTeamId("nope"), 0, "garbage")
 eq(M.validTeamId(-3), 0, "negative")
+
+console.log("live scores")
+// eventsnext drops a match the moment it starts, so live has its own feed.
+const LIVE = { livescore: [
+  { idEvent: "1", idHomeTeam: "136013", idAwayTeam: "137721",
+    strHomeTeam: "Al-Hilal", strAwayTeam: "Al-Ahli",
+    intHomeScore: "2", intAwayScore: "1", strStatus: "2H", strProgress: "67",
+    strLeague: "Saudi-Arabian Pro League",
+    strHomeTeamBadge: "https://x/h.png", strAwayTeamBadge: "https://x/a.png" },
+  { idEvent: "2", idHomeTeam: "999", idAwayTeam: "998", strHomeTeam: "X", strAwayTeam: "Y",
+    intHomeScore: "0", intAwayScore: "0", strStatus: "1H", strProgress: "5" }
+] }
+{
+  const l = M.sdbLiveForTeam(LIVE, 136013)
+  eq(l.teams.home.name, "Al-Hilal", "found our match among every live game")
+  eq(l.goals.home, 2, "score")
+  eq(M.matchState(l), "live", "state is live")
+  eq(M.pillLabel(l, NOW, { teamId: 136013, when }), "HIL 2 - 1 AHL  67'", "live pill")
+  eq(M.sdbLiveForTeam(LIVE, 12345), null, "not playing -> nothing")
+  eq(M.sdbLiveForTeam({}, 136013), null, "empty feed")
+}
+eq(M.liveWindow(fx({ strStatus: "2H" }), NOW), true, "already live")
+eq(M.liveWindow(fx(), Date.parse("2026-09-01T17:55:00Z")), true, "just before kick-off")
+eq(M.liveWindow(fx(), Date.parse("2026-09-01T19:30:00Z")), true, "during")
+eq(M.liveWindow(fx(), NOW), false, "six hours out is not worth asking")
+eq(M.liveWindow(fx(), Date.parse("2026-09-02T02:00:00Z")), false, "long over")
+eq(M.liveWindow(null, NOW), false, "no fixture")
+
+console.log("browse by place")
+eq(M.sdbCountries({ countries: [{ name_en: "Spain" }, { name_en: "Albania" }] }),
+   [{ name: "Albania", flag: "" }, { name: "Spain", flag: "" }], "countries sorted")
+eq(M.sdbCountries({}), [], "no countries")
+eq(M.sdbLeagues({ countries: [{ idLeague: "4668", strLeague: "Saudi-Arabian Pro League" }] }),
+   [{ id: 4668, name: "Saudi-Arabian Pro League", badge: "" }], "leagues")
+eq(M.sdbLeagues({ countries: [{ idLeague: "1" }] }), [], "a league with no name is dropped")
+eq(M.sdbLeaguesUrl("", "Saudi Arabia"),
+   "https://www.thesportsdb.com/api/v1/json/3/search_all_leagues.php?c=Saudi%20Arabia&s=Soccer", "leagues url")
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)
