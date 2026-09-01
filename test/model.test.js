@@ -184,14 +184,31 @@ eq(M.liveWindow(fx(), Date.parse("2026-09-02T02:00:00Z")), false, "long over")
 eq(M.liveWindow(null, NOW), false, "no fixture")
 
 console.log("browse by place")
-eq(M.sdbCountries({ countries: [{ name_en: "Spain" }, { name_en: "Albania" }] }),
-   [{ name: "Albania", flag: "" }, { name: "Spain", flag: "" }], "countries sorted")
-eq(M.sdbCountries({}), [], "no countries")
+{
+  // all_countries.php stops at Costa Rica (the first 50 by ISO code), so the
+  // API alone never offers Saudi Arabia. The list is the API's plus a checked
+  // built-in one, deduped.
+  const merged = M.sdbCountries({ countries: [{ name_en: "Andorra" }, { name_en: "Spain" }] })
+  const names = merged.map(c => c.name)
+  eq(names.includes("Saudi Arabia"), true, "Saudi Arabia is present despite the API omitting it")
+  eq(names.includes("Andorra"), true, "an API-only country is kept")
+  eq(names.filter(n => n === "Spain").length, 1, "a country in both lists appears once")
+  eq(names.join(",") === names.slice().sort().join(","), true, "sorted")
+  eq(M.sdbCountries(null).length, M.knownCountries().length, "no payload still yields the built-in list")
+  eq(M.knownCountries().includes("Saudi Arabia"), true, "built-in list carries it")
+}
 eq(M.sdbLeagues({ countries: [{ idLeague: "4668", strLeague: "Saudi-Arabian Pro League" }] }),
    [{ id: 4668, name: "Saudi-Arabian Pro League", badge: "" }], "leagues")
 eq(M.sdbLeagues({ countries: [{ idLeague: "1" }] }), [], "a league with no name is dropped")
 eq(M.sdbLeaguesUrl("", "Saudi Arabia"),
    "https://www.thesportsdb.com/api/v1/json/3/search_all_leagues.php?c=Saudi%20Arabia&s=Soccer", "leagues url")
+
+console.log("rate limiting")
+// The shared key is behind Cloudflare, which answers with bare text, not JSON.
+eq(M.rateLimited("error code: 1015"), true, "cloudflare 1015")
+eq(M.rateLimited("\nerror code: 1015\n"), true, "with whitespace")
+eq(M.rateLimited('{"teams":[]}'), false, "real JSON is not a rate limit")
+eq(M.rateLimited(""), false, "empty")
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

@@ -53,6 +53,11 @@ omarchy plugin add https://github.com/tsubaie/omarchy-next-match.git --enable
 Click the pill and walk **country → league → club**, with a filter box at each
 step. That is the whole setup.
 
+The country list is a built-in one merged with whatever the API returns:
+TheSportsDB's own `all_countries.php` stops at the first 50 by ISO code — it
+ends at Costa Rica, so Saudi Arabia is never in it. Any country not listed is
+still reachable: type it and the filter offers to look it up directly.
+
 Browsing rather than typing is deliberate: TheSportsDB's club search matches an
 alternate-names field, so `Al-Hilal` returns nothing where `Al Hilal SFC` finds
 it. Picking from a list cannot miss, and it is also how you find a club whose
@@ -61,6 +66,13 @@ exact name you do not know.
 Omarchy 4 renders no settings form for a third-party bar widget, so the plugin
 carries its own; it opens by itself until a team is picked, and from a "Change
 team" button afterwards.
+
+### If it says it is rate limited
+
+The shared key sits behind Cloudflare, which starts refusing with a bare
+`error code: 1015` under load. The widget names that rather than calling it a
+connection problem, keeps the fixture it already has, and tries again on the
+next tick. Your own key avoids it: `omarchy bar set tsubaie.next-match apiKey <key>`.
 
 ## Polling
 

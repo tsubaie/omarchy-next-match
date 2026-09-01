@@ -167,6 +167,13 @@ Panel {
       scheduleNext()
       return
     }
+    if (Model.rateLimited(text)) {
+      // Transient and not the user's doing: keep the last good fixture and
+      // come back later rather than replacing it with an error.
+      if (!root.fixture) root.errorText = "Rate limited"
+      scheduleNext()
+      return
+    }
     try {
       applyPayload(JSON.parse(text), false)
     } catch (e) {
@@ -341,8 +348,14 @@ Panel {
     root.leagueList = []
     root.teamList = []
     filterField.text = ""
-    if (root.countryList.length === 0) fetchBrowse("country", Model.sdbCountriesUrl(root.sdbKey))
-    else root.browseNote = ""
+    root.browseNote = ""
+    // Show the built-in list at once rather than an empty panel, then fold in
+    // whatever the API adds. Its own list stops at Costa Rica, so this is the
+    // part that actually has Saudi Arabia in it.
+    if (root.countryList.length === 0) {
+      root.countryList = Model.sdbCountries(null)
+      fetchBrowse("country", Model.sdbCountriesUrl(root.sdbKey))
+    }
   }
 
   function fetchBrowse(kind, url) {
@@ -379,6 +392,10 @@ Panel {
   function onBrowsed(raw) {
     root.browsing = false
     var text = String(raw || "").trim()
+    if (Model.rateLimited(text)) {
+      root.browseNote = "TheSportsDB is rate-limiting its shared key. Wait a minute and try again."
+      return
+    }
     var payload = null
     if (text !== "") { try { payload = JSON.parse(text) } catch (e) { payload = null } }
     if (!payload) { root.browseNote = "Could not load — check your connection"; return }
@@ -388,7 +405,9 @@ Panel {
       root.browseNote = root.countryList.length === 0 ? "No countries returned" : ""
     } else if (root.browseKind === "league") {
       root.leagueList = Model.sdbLeagues(payload)
-      root.browseNote = root.leagueList.length === 0 ? "No football leagues listed for " + root.chosenCountry : ""
+      root.browseNote = root.leagueList.length === 0
+        ? "No football leagues listed for " + root.chosenCountry + ". Try Back and a different spelling."
+        : ""
     } else {
       root.teamList = Model.sdbTeams(payload)
       root.browseNote = root.teamList.length === 0 ? "No clubs listed for " + root.chosenLeague : ""
@@ -528,6 +547,21 @@ Panel {
               font.family: root.fontFam
               font.pixelSize: Style.font.bodySmall
             }
+          }
+
+          // Any country is reachable even when it is not in the list: what you
+          // typed is looked up directly.
+          Button {
+            width: body.width
+            visible: root.browseStage === "country"
+                     && String(filterField.text).trim().length >= 3
+                     && root.visibleRows.length === 0
+            bordered: true
+            text: "Look up \"" + String(filterField.text).trim() + "\""
+            foreground: root.fg
+            fontFamily: root.fontFam
+            fontSize: Style.font.bodySmall
+            onClicked: root.chooseCountry(String(filterField.text).trim())
           }
 
           Text {

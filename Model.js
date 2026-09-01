@@ -181,17 +181,52 @@ function liveWindow(fx, nowMs) {
   return nowMs >= ko - 10 * 60000 && nowMs <= ko + 3.5 * 3600 * 1000
 }
 
+// The shared key is rate-limited by Cloudflare, which answers with a bare
+// "error code: 1015" rather than JSON. Worth naming, because "could not load"
+// sends people looking for a bug that is not theirs.
+function rateLimited(text) {
+  var t = String(text || "")
+  return /error code:\s*1015/i.test(t) || /rate limit/i.test(t)
+}
+
 // -------------------------------------------------------------- browse by place
 
 function sdbCountriesUrl(key) { return sdbUrl(key, "all_countries.php") }
 
+// all_countries.php returns only the first 50 by ISO code — it stops at Costa
+// Rica, so Saudi Arabia (SA) is never in it. Querying leagues by country name
+// works for countries the list omits, so the list is a convenience, not the
+// authority: these names are checked against the leagues endpoint, and anything
+// missing is still reachable by typing it.
+var KNOWN_COUNTRIES = [
+  "Algeria", "Argentina", "Australia", "Austria", "Bahrain", "Belgium", "Brazil",
+  "Chile", "China", "Colombia", "Croatia", "Denmark", "Egypt", "England",
+  "France", "Germany", "Ghana", "Greece", "India", "Iran", "Iraq", "Ireland",
+  "Israel", "Italy", "Japan", "Jordan", "Kenya", "Kuwait", "Lebanon", "Libya",
+  "Mexico", "Morocco", "Netherlands", "Nigeria", "Norway", "Oman", "Peru",
+  "Poland", "Portugal", "Qatar", "Romania", "Russia", "Saudi Arabia", "Scotland",
+  "Serbia", "South Africa", "South Korea", "Spain", "Sudan", "Sweden",
+  "Switzerland", "Syria", "Tunisia", "Turkey", "Ukraine", "United Arab Emirates",
+  "United States", "Uruguay", "Wales"
+]
+
+function knownCountries() { return KNOWN_COUNTRIES.slice() }
+
 function sdbCountries(payload) {
-  var rows = payload && Array.isArray(payload.countries) ? payload.countries : []
+  var seen = {}
   var out = []
-  for (var i = 0; i < rows.length; ++i) {
-    var name = String((rows[i] && (rows[i].name_en || rows[i].strCountry)) || "").trim()
-    if (name) out.push({ name: name, flag: String((rows[i] && rows[i].flag_url_32) || "") })
+  function add(name, flag) {
+    var n = String(name || "").trim()
+    if (!n) return
+    var key = n.toLowerCase()
+    if (seen[key]) return
+    seen[key] = true
+    out.push({ name: n, flag: String(flag || "") })
   }
+  var rows = payload && Array.isArray(payload.countries) ? payload.countries : []
+  for (var i = 0; i < rows.length; ++i)
+    add(rows[i] && (rows[i].name_en || rows[i].strCountry), rows[i] && rows[i].flag_url_32)
+  for (var j = 0; j < KNOWN_COUNTRIES.length; ++j) add(KNOWN_COUNTRIES[j], "")
   out.sort(function(a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0) })
   return out
 }
@@ -458,7 +493,9 @@ if (typeof module !== "undefined") {
     sdbLiveForTeam: sdbLiveForTeam,
     liveWindow: liveWindow,
     sdbCountriesUrl: sdbCountriesUrl,
+    rateLimited: rateLimited,
     sdbCountries: sdbCountries,
+    knownCountries: knownCountries,
     sdbLeaguesUrl: sdbLeaguesUrl,
     sdbLeagues: sdbLeagues,
     sdbSearchVariants: sdbSearchVariants,
