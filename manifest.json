@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "id": "tsubaie.next-match",
+  "name": "Next Match",
+  "version": "0.1.0",
+  "author": "tsubaie",
+  "license": "MIT",
+  "description": "Your team's next fixture in the bar, counting down to kick-off.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Next Match",
+    "description": "Your team's next fixture in the bar, counting down to kick-off.",
+    "category": "Info",
+    "allowMultiple": false,
+    "defaultSection": "center",
+    "defaults": {
+      "icon": "⚽",
+      "refreshMinutes": 60,
+      "showLive": true
+    },
+    "schema": [
+      {
+        "key": "apiKey",
+        "type": "string",
+        "label": "API key",
+        "defaultValue": "",
+        "description": "Your key from dashboard.api-football.com (Profile → API key). Paste it here and it works. To keep it out of shell.json — which matters if you sync your dotfiles to a public remote — write 'file:~/.config/omarchy/next-match.key' to read it from a file instead, or 'env:API_FOOTBALL_KEY' to read it from the environment. Either way the key is never passed on a command line, where any local user could read it out of ps."
+      },
+      {
+        "key": "teamId",
+        "type": "integer",
+        "label": "Team ID",
+        "min": 0,
+        "max": 9999999,
+        "step": 1,
+        "defaultValue": 0,
+        "description": "api-football's numeric id for your team — 40 is Liverpool, 33 Manchester United, 529 Barcelona. Run scripts/find-team from this plugin's folder to look yours up by name."
+      },
+      {
+        "key": "showLive",
+        "type": "boolean",
+        "label": "Show the score while the match is on",
+        "defaultValue": true,
+        "description": "The pill becomes a live scoreline once the match kicks off, and polls every 5 minutes while it runs. Off leaves it on the kick-off label and spends nothing extra, which is the setting to pick if you would rather not know before you watch it back."
+      },
+      {
+        "key": "refreshMinutes",
+        "type": "integer",
+        "label": "Base refresh",
+        "min": 15,
+        "max": 720,
+        "step": 15,
+        "defaultValue": 60,
+        "description": "Minutes between checks when the next match is more than a day away. This is only a floor: the widget already slows to 6 hours when nothing is close and tightens to 15 minutes near kick-off, so the free plan's 100 requests a day is never in danger. Raise it if you share a key across machines."
+      },
+      {
+        "key": "icon",
+        "type": "string",
+        "label": "Icon",
+        "defaultValue": "⚽",
+        "description": "Glyph shown before the label. Any emoji or Nerd Font glyph."
+      },
+      {
+        "key": "hideWhenIdle",
+        "type": "boolean",
+        "label": "Hide when nothing is scheduled",
+        "defaultValue": false,
+        "description": "Off-season and international breaks leave no fixture to show. On, the widget takes no space at all until one appears, rather than sitting there saying so."
+      }
+    ]
+  }
+}

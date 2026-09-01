@@ -1,0 +1,413 @@
+import QtQuick
+import Quickshell
+import Quickshell.Io
+import qs.Commons
+import qs.Ui
+import "Model.js" as Model
+
+// Owns the fixture data: settings, fetching, caching and pacing. BarWidget.qml
+// reads `pillLabel` off this and draws the button.
+Panel {
+  id: root
+  moduleName: "tsubaie.next-match"
+  ipcTarget: "tsubaie.next-match"
+  manageIpc: false
+
+  property var anchorItem: null
+  property bool openedFromHotkey: false
+
+  // The bar tracks the widget mounted in its slot — BarWidget.qml — not this
+  // nested panel, so everything the bar identifies a panel by must be that
+  // widget.
+  property var hostWidget: null
+  readonly property var barIdentity: hostWidget || root
+
+  // ------------------------------------------------------------------ settings
+
+  readonly property string apiKeySpec: String(root.setting("apiKey", ""))
+  readonly property var keySpec: Model.parseKeySpec(apiKeySpec)
+  readonly property int teamId: Model.validTeamId(root.setting("teamId", 0))
+  readonly property bool showLive: root.setting("showLive", true) === true
+  readonly property int baseMinutes: {
+    var n = parseInt(root.setting("refreshMinutes", 60), 10)
+    return isFinite(n) && n >= 15 ? n : 60
+  }
+
+  readonly property bool hasKey: keySpec.mode !== "none"
+  readonly property bool configured: hasKey && teamId > 0
+
+  // --------------------------------------------------------------------- state
+
+  property var fixture: null
+  property string errorText: ""
+  property double lastFetchMs: 0
+  property bool fetching: false
+  property string quotaText: ""
+
+  // Advanced by a timer rather than read from Date.now() at use sites, so every
+  // binding that shows a countdown re-evaluates together.
+  property double nowMs: Date.now()
+
+  readonly property bool idle: configured && errorText === "" && fixture === null
+  readonly property bool needsAttention: !configured || errorText !== ""
+
+  readonly property string cachePath: Quickshell.env("HOME") + "/.cache/omarchy-next-match/fixture.json"
+  readonly property string fetchUrl: "https://v3.football.api-sports.io/fixtures?team=" + teamId + "&next=1"
+
+  readonly property var whenParts: {
+    var ko = Model.kickoffMs(root.fixture)
+    if (!isFinite(ko)) return null
+    var d = new Date(ko)
+    return { weekday: Qt.formatDateTime(d, "ddd"), time: Qt.formatDateTime(d, "HH:mm") }
+  }
+
+  readonly property string pillLabel: {
+    if (!hasKey) return "Add API key"
+    if (teamId <= 0) return "Set team ID"
+    if (errorText !== "") return errorText
+    if (fixture === null) return lastFetchMs === 0 ? "…" : "No match"
+    return Model.pillLabel(root.fixture, root.nowMs, {
+      teamId: root.teamId,
+      showLive: root.showLive,
+      when: root.whenParts
+    })
+  }
+
+  readonly property string tooltip: {
+    if (!configured) return "Next Match — open to finish setup"
+    if (errorText !== "") return "Next Match — " + errorText
+    if (!fixture) return "Next Match — nothing scheduled"
+    var s = Model.sides(root.fixture, root.teamId)
+    if (!s) return "Next Match"
+    return s.home.name + " v " + s.away.name
+  }
+
+  // ------------------------------------------------------------------ lifecycle
+
+  function refresh(force) {
+    if (!configured || fetchProc.running) return
+    // A reload storm (theme switch, plugin rescan) must not spend the daily
+    // budget: ignore anything that comes back inside a minute unless a human
+    // asked for it.
+    if (!force && root.lastFetchMs > 0 && Date.now() - root.lastFetchMs < 60000) return
+    root.fetching = true
+    fetchProc.running = true
+  }
+
+  function applyPayload(payload, fromCache) {
+    var err = Model.apiError(payload)
+    if (err !== "") {
+      root.errorText = err
+      // A cached fixture is better than an error pill while the key is being
+      // fixed, so keep whatever is already on screen.
+      return
+    }
+    root.errorText = ""
+    root.fixture = Model.firstFixture(payload)
+    if (!fromCache) root.lastFetchMs = Date.now()
+    if (payload && payload.paging !== undefined && payload.results !== undefined)
+      root.quotaText = ""
+    scheduleNext()
+  }
+
+  function onFetched(raw) {
+    root.fetching = false
+    var text = String(raw || "").trim()
+    if (text === "") {
+      // curl failed (offline, DNS, timeout). Keep the last good fixture and
+      // try again on the normal schedule rather than blanking the bar.
+      root.errorText = root.fixture ? "" : "Offline"
+      scheduleNext()
+      return
+    }
+    try {
+      applyPayload(JSON.parse(text), false)
+    } catch (e) {
+      root.errorText = "Bad response"
+      scheduleNext()
+    }
+  }
+
+  function loadCache(text) {
+    if (root.fixture !== null) return
+    var raw = String(text || "").trim()
+    if (raw === "") return
+    try {
+      var payload = JSON.parse(raw)
+      applyPayload(payload, true)
+      // Cached data is shown immediately but is not proof of a recent fetch;
+      // refresh() decides on its own whether the network is due.
+    } catch (e) {
+      // A corrupt cache is not worth reporting; the next fetch overwrites it.
+    }
+  }
+
+  function scheduleNext() {
+    var mins = Model.refreshMinutes(root.fixture, root.nowMs, root.baseMinutes, root.showLive)
+    refreshTimer.interval = Math.max(60000, mins * 60000)
+    refreshTimer.restart()
+  }
+
+  onConfiguredChanged: if (configured) refresh(true)
+  onTeamIdChanged: { root.fixture = null; root.errorText = ""; if (configured) refresh(true) }
+  onApiKeySpecChanged: { root.errorText = ""; if (configured) refresh(true) }
+
+  Component.onCompleted: {
+    cacheFile.reload()
+    if (configured) refresh(true)
+    scheduleNext()
+  }
+
+  // --------------------------------------------------------------------- timers
+
+  // Drives the countdown text. Ticking a label is free; refetching is not.
+  Timer {
+    interval: 30000
+    running: true
+    repeat: true
+    onTriggered: root.nowMs = Date.now()
+  }
+
+  Timer {
+    id: refreshTimer
+    interval: 3600000
+    running: root.configured
+    repeat: true
+    onTriggered: root.refresh(false)
+  }
+
+  // ---------------------------------------------------------------------- I/O
+
+  FileView {
+    id: cacheFile
+    path: root.cachePath
+    watchChanges: false
+    printErrors: false
+    onLoaded: root.loadCache(text())
+    onLoadFailed: function(error) { /* no cache yet; first fetch writes one */ }
+  }
+
+  // The key reaches bash through the environment and the header reaches curl
+  // through a config file on stdin, so it appears in neither process's argv.
+  // `ps` on a shared machine shows the URL and nothing else.
+  Process {
+    id: fetchProc
+    running: false
+    command: ["bash", "-c", root.fetchScript]
+    environment: ({
+      "NM_KEY": root.keySpec.mode === "inline" ? root.keySpec.value : "",
+      "NM_KEY_REF": root.keySpec.mode === "inline" ? "" : root.keySpec.value,
+      "NM_URL": root.fetchUrl,
+      "NM_CACHE": root.cachePath
+    })
+    // onStreamFinished fires even when curl dies early, with empty text, so
+    // there is no need for an onExited handler to clear `fetching` as well.
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.onFetched(text)
+    }
+  }
+
+  readonly property string fetchScript:
+    'key=$(' + Model.keyResolverScript(root.apiKeySpec) + ')\n' +
+    'key=$(printf %s "$key" | tr -d "[:space:]")\n' +
+    'if [ -z "$key" ]; then printf %s \'{"errors":{"token":"missing"}}\'; exit 0; fi\n' +
+    'out=$(printf \'header = "x-apisports-key: %s"\\nurl = "%s"\\n\' "$key" "$NM_URL" | curl -fsS --max-time 20 -K -) || out=""\n' +
+    'if [ -n "$out" ]; then mkdir -p "$(dirname "$NM_CACHE")" && printf %s "$out" > "$NM_CACHE".tmp && mv -f "$NM_CACHE".tmp "$NM_CACHE"; fi\n' +
+    'printf %s "$out"\n'
+
+  // -------------------------------------------------------------- panel plumbing
+
+  function open() {
+    openedFromHotkey = false
+    root.controller.show()
+    root.refresh(false)
+  }
+
+  function openFromHotkey() {
+    openedFromHotkey = true
+    root.controller.show()
+    root.refresh(false)
+  }
+
+  function close() { root.controller.hide() }
+  function toggle() { root.opened ? root.close() : root.openFromHotkey() }
+
+  function switchPanel(direction) {
+    if (root.bar && typeof root.bar.switchPanelFrom === "function")
+      return root.bar.switchPanelFrom(root.barIdentity, direction)
+    return false
+  }
+
+  // ------------------------------------------------------------------- the popup
+
+  readonly property color fg: root.bar ? root.bar.barForeground : Color.foreground
+  readonly property string fontFam: root.bar ? root.bar.fontFamily : Style.font.family
+  readonly property var sidesNow: Model.sides(root.fixture, root.teamId)
+
+  KeyboardPanel {
+    id: panel
+    anchorItem: root.anchorItem
+    owner: root.barIdentity
+    bar: root.bar
+    open: root.opened
+    focusTarget: keyCatcher
+    contentWidth: panel.fittedContentWidth(Style.space(320))
+    contentHeight: panel.fittedContentHeight(body.implicitHeight)
+
+    PanelKeyCatcher {
+      id: keyCatcher
+      anchors.fill: parent
+      onCloseRequested: root.close()
+      onTabRequested: function(direction) { root.switchPanel(direction) }
+
+      Column {
+        id: body
+        width: parent.width
+        spacing: Style.space(10)
+
+        // ---- setup guidance, shown until both settings are present
+        Column {
+          width: parent.width
+          spacing: Style.space(6)
+          visible: !root.configured
+
+          Text {
+            text: "Next Match needs setting up"
+            color: root.fg
+            font.family: root.fontFam
+            font.pixelSize: Style.font.body
+            font.bold: true
+          }
+          Text {
+            width: body.width
+            wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
+            text: (!root.hasKey ? "Add your api-football key in this widget's settings. " : "")
+                  + (root.teamId <= 0 ? "Add your team's numeric id — run scripts/find-team in the plugin folder to look it up by name." : "")
+            color: Qt.darker(root.fg, 1.4)
+            font.family: root.fontFam
+            font.pixelSize: Style.font.bodySmall
+          }
+        }
+
+        // ---- error
+        Text {
+          width: body.width
+          visible: root.configured && root.errorText !== ""
+          wrapMode: Text.WordWrap
+          textFormat: Text.PlainText
+          text: root.errorText
+          color: root.bar ? root.bar.urgent : Color.urgent
+          font.family: root.fontFam
+          font.pixelSize: Style.font.bodySmall
+        }
+
+        // ---- nothing scheduled
+        Text {
+          visible: root.configured && root.errorText === "" && root.fixture === null && root.lastFetchMs > 0
+          text: "No upcoming fixture"
+          color: Qt.darker(root.fg, 1.4)
+          font.family: root.fontFam
+          font.pixelSize: Style.font.bodySmall
+          font.italic: true
+        }
+
+        // ---- the fixture
+        Column {
+          width: parent.width
+          spacing: Style.space(8)
+          visible: root.fixture !== null && root.errorText === ""
+
+          Text {
+            width: body.width
+            elide: Text.ElideRight
+            textFormat: Text.PlainText
+            text: root.fixture && root.fixture.league
+                  ? Model.plainText(root.fixture.league.name)
+                  : ""
+            color: Qt.darker(root.fg, 1.4)
+            font.family: root.fontFam
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          Text {
+            width: body.width
+            wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
+            text: root.sidesNow
+                  ? Model.plainText(root.sidesNow.home.name) + "   v   " + Model.plainText(root.sidesNow.away.name)
+                  : ""
+            color: root.fg
+            font.family: root.fontFam
+            font.pixelSize: Style.font.body
+            font.bold: true
+          }
+
+          Text {
+            width: body.width
+            textFormat: Text.PlainText
+            text: {
+              if (!root.fixture) return ""
+              var ko = Model.kickoffMs(root.fixture)
+              if (!isFinite(ko)) return ""
+              var d = new Date(ko)
+              var state = Model.matchState(root.fixture)
+              if (state === "live") return "Live now"
+              if (state === "finished") return "Finished"
+              var delta = ko - root.nowMs
+              return Qt.formatDateTime(d, "dddd d MMMM, HH:mm")
+                     + (delta > 0 ? "   ·   in " + Model.countdown(delta) : "")
+            }
+            color: root.fg
+            font.family: root.fontFam
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          Text {
+            width: body.width
+            visible: text !== ""
+            elide: Text.ElideRight
+            textFormat: Text.PlainText
+            text: {
+              if (!root.fixture || !root.fixture.fixture) return ""
+              var v = root.fixture.fixture.venue
+              if (!v || !v.name) return ""
+              return Model.plainText(v.name) + (v.city ? ", " + Model.plainText(v.city) : "")
+            }
+            color: Qt.darker(root.fg, 1.4)
+            font.family: root.fontFam
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          Text {
+            width: body.width
+            visible: root.sidesNow !== null
+            textFormat: Text.PlainText
+            text: root.sidesNow ? (root.sidesNow.atHome ? "Home" : "Away") : ""
+            color: Qt.darker(root.fg, 1.4)
+            font.family: root.fontFam
+            font.pixelSize: Style.font.bodySmall
+          }
+        }
+
+        PanelSeparator { width: parent.width }
+
+        Text {
+          width: body.width
+          textFormat: Text.PlainText
+          text: {
+            if (root.fetching) return "Refreshing…"
+            if (root.lastFetchMs === 0) return "Middle-click the pill to refresh"
+            var mins = Math.floor((root.nowMs - root.lastFetchMs) / 60000)
+            var ago = mins < 1 ? "just now" : (mins < 60 ? mins + "m ago" : Math.floor(mins / 60) + "h ago")
+            return "Updated " + ago + "   ·   middle-click to refresh"
+          }
+          color: Qt.darker(root.fg, 1.6)
+          font.family: root.fontFam
+          font.pixelSize: Style.font.bodySmall
+        }
+      }
+    }
+  }
+}
