@@ -126,12 +126,24 @@ console.log("merging search into the browsed list")
   const found = [{ id: 3, name: "Al-Nassr", country: "Saudi Arabia" },
                  { id: 9, name: "Liverpool", country: "England" },
                  { id: 2, name: "Al-Ahli", country: "Saudi Arabia" }]
-  const merged = M.mergeTeams(browsed, found, "Saudi Arabia")
-  eq(merged.map(t => t.name), ["Abha", "Al-Ahli", "Al-Nassr"], "a club past the ten-item cap is reachable by search")
+  const merged = M.mergeTeams(browsed, found)
+  eq(merged.map(t => t.name), ["Al-Nassr", "Liverpool", "Al-Ahli", "Abha"],
+     "search hits lead, then the browsed list")
   eq(merged.filter(t => t.name === "Al-Ahli").length, 1, "no duplicate from both routes")
-  eq(M.mergeTeams(browsed, found, "England").map(t => t.name), ["Liverpool"],
-     "filtering to England keeps only the English club")
-  eq(M.mergeTeams(null, null, "Spain"), [], "nothing at all")
+  // A search for "nass" turns up Nässjö in Sweden. Hiding it for being in the
+  // wrong country left the user staring at an empty list.
+  eq(M.mergeTeams([], [{ id: 5, name: "Nässjö", country: "Sweden" }]).length, 1,
+     "a hit from another country is kept, not discarded")
+  eq(M.mergeTeams(null, null), [], "nothing at all")
+  // The country you picked floats up, but a foreign near-miss is still shown.
+  eq(M.mergeTeams([], [{ id: 5, name: "Nässjö", country: "Sweden" },
+                        { id: 6, name: "Al-Nassr", country: "Saudi Arabia" }], "Saudi Arabia")
+     .map(t => t.name), ["Al-Nassr", "Nässjö"], "chosen country first")
+  eq(M.noneFromCountry([{ name: "Nässjö", country: "Sweden" }], "Saudi Arabia"), true,
+     "only foreign matches -> say so")
+  eq(M.noneFromCountry([{ name: "Al-Nassr", country: "Saudi Arabia" }], "Saudi Arabia"), false,
+     "a local match -> nothing to explain")
+  eq(M.noneFromCountry([], "Saudi Arabia"), false, "an empty list is a different message")
 }
 
 console.log("selection")
@@ -255,6 +267,10 @@ eq(M.matchesQuery("Liverpool", "liv"), true, "prefix")
 eq(M.matchesQuery("Liverpool", "xyz"), false, "no match")
 eq(M.matchesQuery("Al-Hilal", ""), true, "an empty query matches everything")
 eq(M.normalizeName("Al-Hilal SFC!"), "alhilalsfc", "normalized")
+// Accents fold too, or a search for "nass" would not match the club it returns.
+eq(M.normalizeName("Nässjö"), "nassjo", "accents folded")
+eq(M.matchesQuery("Nässjö", "nass"), true, "accented club found by plain letters")
+eq(M.matchesQuery("Málaga", "malaga"), true, "and the other way round")
 
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

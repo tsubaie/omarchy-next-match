@@ -323,16 +323,15 @@ function sides(fx, teamId) {
   }
 }
 
-// Merge search results into the browsed list: same club from either route
-// appears once, and anything from another country is dropped, since the user
-// has already said which one they mean.
-function mergeTeams(existing, found, country) {
+// Merge search results with the browsed list, search hits first. Country is not
+// used to filter: a search for "nass" legitimately turns up Nässjö in Sweden,
+// and hiding it leaves the user staring at an empty list wondering what they
+// typed wrong. The country is shown on each row instead.
+function mergeTeams(existing, found, preferCountry) {
   var out = []
   var seen = {}
-  var want = String(country || "").trim().toLowerCase()
   function add(t) {
     if (!t || !t.id) return
-    if (want && String(t.country || "").trim().toLowerCase() !== want) return
     if (seen[t.id]) return
     seen[t.id] = true
     out.push(t)
@@ -341,8 +340,25 @@ function mergeTeams(existing, found, country) {
   var b = Array.isArray(found) ? found : []
   for (var i = 0; i < b.length; ++i) add(b[i])
   for (var j = 0; j < a.length; ++j) add(a[j])
-  out.sort(function(x, y) { return x.name < y.name ? -1 : (x.name > y.name ? 1 : 0) })
-  return out
+
+  // Clubs from the country you picked float up; the rest stay, because a
+  // near-miss in another country is still information about what you typed.
+  var want = normalizeName(preferCountry)
+  if (want === "") return out
+  var mine = [], others = []
+  for (var k = 0; k < out.length; ++k)
+    (normalizeName(out[k].country) === want ? mine : others).push(out[k])
+  return mine.concat(others)
+}
+
+// True when a search found clubs but none in the country being browsed — the
+// case where "nass" answers with Nässjö in Sweden and the user meant Al-Nassr.
+function noneFromCountry(rows, country) {
+  var want = normalizeName(country)
+  if (want === "" || !Array.isArray(rows) || rows.length === 0) return false
+  for (var i = 0; i < rows.length; ++i)
+    if (normalizeName(rows[i].country) === want) return false
+  return true
 }
 
 // The opponent's badge. You already know which club is yours, so theirs is the
@@ -423,9 +439,20 @@ function dayKind(koMs, nowMs) {
 // Matching that ignores punctuation and case, so filtering a list for
 // "Al Nassr" still finds "Al-Nassr" — otherwise the very query that found a
 // club hides it again.
+var ACCENTS = "àáâãäåāăąèéêëēĕėęěìíîïĩīĭįıòóôõöøōŏőùúûüũūŭůűųçćĉċčñńņňýÿŷšśşžźżðþ"
+var PLAIN   = "aaaaaaaaaeeeeeeeeeiiiiiiiiiooooooooouuuuuuuuuucccccnnnnyyysssszzzdt"
+
+// Punctuation, case and accents all removed: a search for "nass" should still
+// find "Nässjö", and typing "Al Nassr" should not hide the stored "Al-Nassr".
 function normalizeName(value) {
-  return String(value === undefined || value === null ? "" : value)
-    .toLowerCase().replace(/[^a-z0-9]+/g, "")
+  var raw = String(value === undefined || value === null ? "" : value).toLowerCase()
+  var out = ""
+  for (var i = 0; i < raw.length; ++i) {
+    var ch = raw.charAt(i)
+    var at = ACCENTS.indexOf(ch)
+    out += at === -1 ? ch : PLAIN.charAt(at)
+  }
+  return out.replace(/[^a-z0-9]+/g, "")
 }
 
 function matchesQuery(name, query) {
@@ -582,6 +609,7 @@ if (typeof module !== "undefined") {
     shortCode: shortCode,
     sides: sides,
     mergeTeams: mergeTeams,
+    noneFromCountry: noneFromCountry,
     opponentBadge: opponentBadge,
     countdown: countdown,
     timingLabel: timingLabel,

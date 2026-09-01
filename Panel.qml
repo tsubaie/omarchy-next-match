@@ -360,6 +360,7 @@ Panel {
     root.chosenCountry = name
     root.browseStage = "team"
     root.teamList = []
+    root.searchState = "idle"
     filterField.text = ""
     fetchBrowse("team", Model.sdbCountryTeamsUrl(root.sdbKey, name))
   }
@@ -372,17 +373,22 @@ Panel {
     var q = String(filterField.text).trim()
     if (q.length < 3 || browseProc.running) return
     root.searchVariants = Model.sdbSearchVariants(q)
-    root.browseNote = "Searching…"
+    root.searchState = "running"
+    root.browseNote = ""
     root.browsing = true
     runTeamSearch()
   }
 
   property var searchVariants: []
+  // "idle" until a search runs, then "running", then "done" — so an empty list
+  // can say whether it is still working or has finished and found nothing.
+  // Without this the placeholder said "Searching…" forever.
+  property string searchState: "idle"
 
   function runTeamSearch() {
     if (root.searchVariants.length === 0) {
       root.browsing = false
-      root.browseNote = "No club matched. Punctuation matters here — try \"Al Nassr\" rather than \"Al-Nassr\"."
+      root.searchState = "done"
       return
     }
     var rest = root.searchVariants.slice()
@@ -414,10 +420,9 @@ Panel {
       var hits = Model.sdbTeams(payload)
       if (hits.length === 0) { runTeamSearch(); return }
       root.searchVariants = []
+      root.searchState = "done"
       root.teamList = Model.mergeTeams(root.teamList, hits, root.chosenCountry)
-      root.browseNote = root.teamList.length === 0
-        ? "Found it, but not in " + root.chosenCountry + ". Go Back and pick the right country."
-        : ""
+      root.browseNote = ""
     } else {
       root.teamList = Model.sdbTeams(payload)
       root.browseNote = root.teamList.length === 0
@@ -572,7 +577,11 @@ Panel {
               font.family: root.fontFam
               font.pixelSize: Style.font.bodySmall
               onAccepted: if (root.browseStage === "team") root.searchTeamsByName()
-              onTextChanged: if (root.browseStage === "team") autoSearchTimer.restart()
+              onTextChanged: {
+                if (root.browseStage !== "team") return
+                root.searchState = "idle"
+                autoSearchTimer.restart()
+              }
             }
 
             Button {
@@ -611,7 +620,24 @@ Panel {
             textFormat: Text.PlainText
             text: String(filterField.text).trim().length < 3
                   ? "Keep typing — three letters searches beyond the listed clubs."
-                  : "Searching…"
+                  : (root.searchState === "done"
+                     ? "No club found for \"" + String(filterField.text).trim() + "\". Try more of the name."
+                     : "Searching…")
+            color: Qt.darker(root.fg, 1.5)
+            font.family: root.fontFam
+            font.pixelSize: Style.font.caption
+          }
+
+          // Say when the only matches are elsewhere, so a search for "nass"
+          // that answers with a Swedish club does not read as a broken widget.
+          Text {
+            width: body.width
+            visible: root.browseStage === "team" && root.searchState === "done"
+                     && Model.noneFromCountry(root.visibleRows, root.chosenCountry)
+            wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
+            text: "Nothing in " + root.chosenCountry + " matched that — try more of the name. "
+                  + "The clubs below are from elsewhere."
             color: Qt.darker(root.fg, 1.5)
             font.family: root.fontFam
             font.pixelSize: Style.font.caption
@@ -653,6 +679,7 @@ Panel {
                   // The league disambiguates: a country list carries both
                   // "Al-Hilal" and "Al Hilal Women".
                   text: modelData.name
+                        + (root.browseStage === "team" && modelData.country ? "   ·   " + modelData.country : "")
                         + (root.browseStage === "team" && modelData.code ? "   ·   " + modelData.code : "")
                   foreground: root.fg
                   fontFamily: root.fontFam
