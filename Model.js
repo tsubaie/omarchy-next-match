@@ -2,6 +2,48 @@
 // functions take "now" as a parameter, keeping those decisions deterministic
 // and the file testable under Node (see test/model.test.js).
 
+// ------------------------------------------------------------------- bounds
+
+// Everything crossing into the widget is bounded before QML buffers or draws
+// it: response and cache bodies by length, derived collections by count, and
+// any single API string by characters. TheSportsDB is not hostile, but a key
+// shared with the whole internet, a CDN someone else controls and a cache file
+// anything with write access can replace should cost a truncated label rather
+// than the shell's memory.
+var LIMITS = {
+  responseChars: 512 * 1024,   // one fixture, live or browse body
+  cacheChars: 256 * 1024,      // what a cache file may contribute
+  imageBytes: 512 * 1024,      // one crest, enforced by curl at fetch time
+  events: 60,                  // fixtures kept from one response
+  teams: 400,                  // clubs kept, per response and once merged
+  countries: 400,
+  leagues: 40,
+  liveRows: 2000,              // rows scanned in the all-of-soccer live feed
+  rows: 300,                   // rows handed to the picker's Repeater
+  text: 120                    // characters of an API string that reaches a label
+}
+
+function limits() { return LIMITS }
+
+// Checked before JSON.parse, so an absurd body costs a length comparison
+// rather than a parse tree the size of the body.
+function oversized(text, max) {
+  var n = isFinite(max) && max > 0 ? max : LIMITS.responseChars
+  return String(text === undefined || text === null ? "" : text).length > n
+}
+
+function clampText(value, max) {
+  var s = String(value === undefined || value === null ? "" : value)
+  var n = isFinite(max) && max > 0 ? max : LIMITS.text
+  return s.length > n ? s.slice(0, n) : s
+}
+
+function boundList(list, max) {
+  if (!Array.isArray(list)) return []
+  var n = isFinite(max) && max > 0 ? max : LIMITS.rows
+  return list.length > n ? list.slice(0, n) : list
+}
+
 // -------------------------------------------------------------- thesportsdb
 
 // A second provider, because api-football's free plan cannot read the current
@@ -24,8 +66,16 @@ function sdbUrl(key, path) {
 // Remote image fields are untrusted API data. Only TheSportsDB's HTTPS hosts
 // are useful here; rejecting other schemes prevents file:// reads and avoids
 // turning the desktop into a requester for arbitrary local/network resources.
+var MAX_URL = 400
+
 function sdbImageUrl(value) {
   var url = String(value || "").trim()
+  // Rejected rather than clamped: a truncated URL is not a shorter version of
+  // the same resource, it is a different one.
+  if (url.length > MAX_URL) return ""
+  // No whitespace: the URL is later handed to curl through a line-oriented
+  // list, and a space in it would split one entry into two.
+  if (/\s/.test(url)) return ""
   return /^https:\/\/([a-z0-9-]+\.)*thesportsdb\.com(?:[\/:?#]|$)/i.test(url) ? url : ""
 }
 
@@ -104,16 +154,16 @@ function sdbToFixture(ev) {
     fixture: {
       timestamp: Math.round(ko / 1000),
       status: { short: sdbStatus(ev), elapsed: sdbInt(ev.strProgress) },
-      venue: { name: String(ev.strVenue || ""), city: "" }
+      venue: { name: clampText(ev.strVenue), city: "" }
     },
     teams: {
-      home: { id: sdbInt(ev.idHomeTeam), name: String(ev.strHomeTeam || "") },
-      away: { id: sdbInt(ev.idAwayTeam), name: String(ev.strAwayTeam || "") }
+      home: { id: sdbInt(ev.idHomeTeam), name: clampText(ev.strHomeTeam) },
+      away: { id: sdbInt(ev.idAwayTeam), name: clampText(ev.strAwayTeam) }
     },
     goals: { home: sdbInt(ev.intHomeScore), away: sdbInt(ev.intAwayScore) },
     league: {
-      name: String(ev.strLeague || ""),
-      round: ev.intRound ? "Round " + ev.intRound : "",
+      name: clampText(ev.strLeague),
+      round: ev.intRound ? clampText("Round " + ev.intRound, 32) : "",
       logo: sdbImageUrl(ev.strLeagueBadge)
     },
     badges: {
@@ -130,7 +180,7 @@ function sdbFixtures(payload) {
   var events = payload.events || payload.results
   if (!Array.isArray(events)) return []
   var out = []
-  for (var i = 0; i < events.length; ++i) {
+  for (var i = 0; i < events.length && out.length < LIMITS.events; ++i) {
     var fx = sdbToFixture(events[i])
     if (fx) out.push(fx)
   }
@@ -140,14 +190,14 @@ function sdbFixtures(payload) {
 function sdbTeams(payload) {
   var teams = payload && Array.isArray(payload.teams) ? payload.teams : []
   var out = []
-  for (var i = 0; i < teams.length; ++i) {
+  for (var i = 0; i < teams.length && out.length < LIMITS.teams; ++i) {
     var t = teams[i]
     if (!t || !t.idTeam) continue
     out.push({
       id: sdbInt(t.idTeam),
-      name: String(t.strTeam || ""),
-      country: String(t.strCountry || ""),
-      code: String(t.strLeague || ""),
+      name: clampText(t.strTeam),
+      country: clampText(t.strCountry),
+      code: clampText(t.strLeague),
       badge: sdbImageUrl(t.strBadge)
     })
   }
@@ -163,7 +213,8 @@ function sdbLiveUrl(key) { return sdbUrl(key, "livescore.php?s=Soccer") }
 function sdbLiveForTeam(payload, teamId) {
   var rows = payload && Array.isArray(payload.livescore) ? payload.livescore : []
   var id = parseInt(teamId, 10)
-  for (var i = 0; i < rows.length; ++i) {
+  var scan = rows.length < LIMITS.liveRows ? rows.length : LIMITS.liveRows
+  for (var i = 0; i < scan; ++i) {
     var r = rows[i]
     if (!r) continue
     if (sdbInt(r.idHomeTeam) !== id && sdbInt(r.idAwayTeam) !== id) continue
@@ -174,11 +225,11 @@ function sdbLiveForTeam(payload, teamId) {
         venue: { name: "", city: "" }
       },
       teams: {
-        home: { id: sdbInt(r.idHomeTeam), name: String(r.strHomeTeam || "") },
-        away: { id: sdbInt(r.idAwayTeam), name: String(r.strAwayTeam || "") }
+        home: { id: sdbInt(r.idHomeTeam), name: clampText(r.strHomeTeam) },
+        away: { id: sdbInt(r.idAwayTeam), name: clampText(r.strAwayTeam) }
       },
       goals: { home: sdbInt(r.intHomeScore), away: sdbInt(r.intAwayScore) },
-      league: { name: String(r.strLeague || ""), round: "", logo: "" },
+      league: { name: clampText(r.strLeague), round: "", logo: "" },
       badges: {
         home: sdbImageUrl(r.strHomeTeamBadge),
         away: sdbImageUrl(r.strAwayTeamBadge)
@@ -234,15 +285,17 @@ function sdbCountries(payload) {
   var seen = {}
   var out = []
   function add(name, flag) {
-    var n = String(name || "").trim()
+    if (out.length >= LIMITS.countries) return
+    var n = clampText(name).trim()
     if (!n) return
     var key = n.toLowerCase()
     if (seen[key]) return
     seen[key] = true
-    out.push({ name: n, flag: String(flag || "") })
+    out.push({ name: n, flag: sdbImageUrl(flag) })
   }
   var rows = payload && Array.isArray(payload.countries) ? payload.countries : []
-  for (var i = 0; i < rows.length; ++i)
+  var scan = rows.length < LIMITS.countries ? rows.length : LIMITS.countries
+  for (var i = 0; i < scan; ++i)
     add(rows[i] && (rows[i].name_en || rows[i].strCountry), rows[i] && rows[i].flag_url_32)
   for (var j = 0; j < KNOWN_COUNTRIES.length; ++j) add(KNOWN_COUNTRIES[j], "")
   out.sort(function(a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0) })
@@ -257,10 +310,10 @@ function sdbLeaguesUrl(key, country) {
 function sdbLeagues(payload) {
   var rows = payload && Array.isArray(payload.countries) ? payload.countries : []
   var out = []
-  for (var i = 0; i < rows.length; ++i) {
+  for (var i = 0; i < rows.length && out.length < LIMITS.leagues; ++i) {
     var r = rows[i]
     if (!r || !r.strLeague) continue
-    out.push({ id: sdbInt(r.idLeague), name: String(r.strLeague), badge: sdbImageUrl(r.strBadge) })
+    out.push({ id: sdbInt(r.idLeague), name: clampText(r.strLeague), badge: sdbImageUrl(r.strBadge) })
   }
   return out
 }
@@ -355,6 +408,7 @@ function mergeTeams(existing, found, country) {
   var seen = {}
   var want = normalizeName(country)
   function add(t) {
+    if (out.length >= LIMITS.teams) return
     if (!t || !t.id) return
     if (want !== "" && normalizeName(t.country) !== want) return
     if (seen[t.id]) return
@@ -463,7 +517,9 @@ var PLAIN   = "aaaaaaaaaeeeeeeeeeiiiiiiiiiooooooooouuuuuuuuuucccccnnnnyyysssszzz
 // Punctuation, case and accents all removed: a search for "nass" should still
 // find "Nässjö", and typing "Al Nassr" should not hide the stored "Al-Nassr".
 function normalizeName(value) {
-  var raw = String(value === undefined || value === null ? "" : value).toLowerCase()
+  // Clamped before the walk: this runs once per row per keystroke, so an
+  // oversized paste into the filter field would otherwise be O(paste x rows).
+  var raw = clampText(value, LIMITS.text).toLowerCase()
   var out = ""
   for (var i = 0; i < raw.length; ++i) {
     var ch = raw.charAt(i)
@@ -587,10 +643,17 @@ function searchValid(query) {
 
 // --------------------------------------------------------------------- sanitize
 
-// Bar labels render through a Text that would otherwise rich-text-parse a
-// crafted setting, so anything user-supplied is flattened first.
-function plainText(value) {
-  return String(value === undefined || value === null ? "" : value).replace(/[<>&]/g, "")
+// The plain-text boundary. Labels, button captions, placeholders and tooltips
+// all render through components that would otherwise rich-text-parse a crafted
+// name, so anything the API or a setting supplies is flattened here — and
+// clamped, because a plain string a megabyte long is its own rendering problem.
+// Enforced on this side rather than trusted to the consumer: the shell's Button
+// and Text happen to ask for PlainText today, and that is not this plugin's
+// invariant to rely on.
+function plainText(value, max) {
+  return clampText(
+    String(value === undefined || value === null ? "" : value).replace(/[<>&]/g, ""),
+    max)
 }
 
 function validTeamId(value) {
@@ -643,6 +706,10 @@ if (typeof module !== "undefined") {
     rowWhen: rowWhen,
     searchValid: searchValid,
     plainText: plainText,
-    validTeamId: validTeamId
+    validTeamId: validTeamId,
+    limits: limits,
+    oversized: oversized,
+    clampText: clampText,
+    boundList: boundList
   }
 }

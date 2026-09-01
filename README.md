@@ -98,6 +98,31 @@ shows the right fixture immediately. Invalid and rate-limited responses do not
 replace that cache. A refresh that arrives within a minute of the last one is
 ignored to survive reload storms.
 
+## Limits
+
+The widget runs on a key shared with everyone else using it, draws crests from
+a CDN it does not control, and reads a cache file anything with write access to
+your home directory could replace. So nothing crossing that line is taken on
+trust about its size:
+
+| What | Ceiling |
+|------|---------|
+| A fixture, live or browse response | 512 KB, enforced by `curl --max-filesize` and again by `head` for a server that declares no length |
+| The cache file | 256 KB, bounded by `head` at the read itself rather than measured once it is in memory |
+| One crest | 512 KB, fetched by curl to `~/.cache/omarchy-next-match/badges/team-<id>.png` and drawn from disk — an `Image` pointed at a remote URL would download whatever was served, since `sourceSize` caps the decode and not the transfer |
+| Fixtures kept from one response | 60 |
+| Clubs, in a response and in the merged list | 400 |
+| Countries / competitions | 400 / 40 |
+| Rows built for the picker | 300 |
+| Any API string reaching a label | 120 characters |
+
+Crest URLs must be HTTPS on `thesportsdb.com`, with no whitespace and no more
+than 400 characters — an over-long URL is refused rather than truncated, since
+a truncated URL points somewhere else. Every API string reaching a button
+caption, a placeholder or a tooltip is flattened to plain text and clamped on
+this side of the boundary, rather than relying on the shell's components to
+keep asking for `Text.PlainText`.
+
 ## Settings
 
 All optional, and all settable from the command line too — which writes through
@@ -128,8 +153,9 @@ omarchy plugin validate .        # manifest against the shell's own schema
 ```
 
 `Model.js` holds the display and selection decisions worth testing — label
-shape, match state, countdowns, poll pacing and key parsing. Time-sensitive
-display functions take "now" as a parameter, so their tests are deterministic.
+shape, match state, countdowns, poll pacing, key parsing and the bounds above.
+Time-sensitive display functions take "now" as a parameter, so their tests are
+deterministic.
 `Panel.qml` owns fetching and state; `BarWidget.qml` owns only the button.
 
 ## Licence

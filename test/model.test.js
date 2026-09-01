@@ -201,6 +201,86 @@ eq(M.plainText("<b>x</b>"), "bx/b", "markup stripped")
 eq(M.validTeamId("136013"), 136013, "numeric string")
 eq(M.validTeamId("nope"), 0, "garbage")
 eq(M.validTeamId(-3), 0, "negative")
+// The plain-text boundary is a length boundary too: a label is not a place to
+// put a megabyte, whatever it is made of.
+eq(M.plainText("x".repeat(5000)).length, M.limits().text, "plainText clamps")
+eq(M.plainText("ab", 1), "a", "explicit clamp honoured")
+eq(M.plainText(null), "", "null is empty")
+eq(M.clampText("abc", 2), "ab", "clampText trims")
+eq(M.clampText("abc", 10), "abc", "clampText leaves short strings alone")
+
+console.log("bounds")
+{
+  const L = M.limits()
+
+  eq(M.oversized("a".repeat(L.responseChars)), false, "a body at the cap is fine")
+  eq(M.oversized("a".repeat(L.responseChars + 1)), true, "one byte over is not")
+  eq(M.oversized("a".repeat(L.cacheChars + 1), L.cacheChars), true, "cache cap is its own")
+  eq(M.oversized(""), false, "empty body")
+  eq(M.oversized(null), false, "null body")
+
+  // Every collection built from a response is capped, because each row becomes
+  // a QML object: a Repeater with a hundred thousand rows is a hung shell.
+  const manyEvents = { events: [] }
+  for (let i = 0; i < 500; ++i)
+    manyEvents.events.push(Object.assign({}, EVENT, { idEvent: String(i) }))
+  eq(M.sdbFixtures(manyEvents).response.length, L.events, "fixtures capped")
+
+  const manyTeams = { teams: [] }
+  for (let i = 0; i < 2000; ++i)
+    manyTeams.teams.push({ idTeam: String(i + 1), strTeam: "T" + i, strCountry: "Saudi Arabia" })
+  eq(M.sdbTeams(manyTeams).length, L.teams, "teams capped")
+
+  const manyLeagues = { countries: [] }
+  for (let i = 0; i < 500; ++i) manyLeagues.countries.push({ idLeague: String(i), strLeague: "L" + i })
+  eq(M.sdbLeagues(manyLeagues).length, L.leagues, "leagues capped")
+
+  const manyCountries = { countries: [] }
+  for (let i = 0; i < 2000; ++i) manyCountries.countries.push({ name_en: "C" + i })
+  eq(M.sdbCountries(manyCountries).length, L.countries, "countries capped")
+
+  // mergeTeams accumulates across every league fetched for a country, so the
+  // cap has to hold on the merged list, not just per response.
+  const lots = []
+  for (let i = 0; i < 1000; ++i) lots.push({ id: i + 1, name: "T" + i, country: "Saudi Arabia" })
+  eq(M.mergeTeams(lots, lots, "Saudi Arabia").length, L.teams, "merged list capped")
+
+  eq(M.boundList(lots).length, L.rows, "row list capped")
+  eq(M.boundList([1, 2]).length, 2, "short list untouched")
+  eq(M.boundList(null), [], "not a list")
+
+  // Long strings are clamped where they are parsed, so nothing downstream has
+  // to remember to do it.
+  const longName = "N".repeat(5000)
+  const fx = M.sdbToFixture(Object.assign({}, EVENT, { strHomeTeam: longName, strVenue: longName }))
+  eq(fx.teams.home.name.length, L.text, "club name clamped at parse")
+  eq(fx.fixture.venue.name.length, L.text, "venue clamped at parse")
+  eq(M.sdbTeams({ teams: [{ idTeam: "1", strTeam: longName }] })[0].name.length, L.text,
+     "picker row clamped at parse")
+
+  // The live feed lists every soccer match being played; the scan is bounded
+  // even though only one row is ever wanted.
+  const flood = { livescore: [] }
+  for (let i = 0; i < L.liveRows + 50; ++i)
+    flood.livescore.push({ idHomeTeam: "1", idAwayTeam: "2", strHomeTeam: "A", strAwayTeam: "B" })
+  flood.livescore.push({ idHomeTeam: "136013", idAwayTeam: "2", strHomeTeam: "Al-Hilal", strAwayTeam: "B" })
+  eq(M.sdbLiveForTeam(flood, 136013), null, "a match past the scan cap is not searched for")
+
+  // normalizeName runs once per row per keystroke, so its input is clamped
+  // before the per-character walk rather than after.
+  eq(M.normalizeName("x".repeat(100000)).length, L.text, "normalizeName clamps its input")
+  eq(M.matchesQuery("Al-Hilal", "alhilal"), true, "clamping did not break matching")
+}
+
+console.log("image urls")
+eq(M.sdbImageUrl("https://r2.thesportsdb.com/a.png"), "https://r2.thesportsdb.com/a.png", "their CDN")
+eq(M.sdbImageUrl("http://r2.thesportsdb.com/a.png"), "", "plain http refused")
+eq(M.sdbImageUrl("file:///etc/passwd"), "", "file scheme refused")
+eq(M.sdbImageUrl("https://evil.example/a.png"), "", "another host refused")
+// The URL is handed to curl through a line-oriented list, so a space in it
+// would split one entry into two.
+eq(M.sdbImageUrl("https://r2.thesportsdb.com/a b.png"), "", "whitespace refused")
+eq(M.sdbImageUrl("https://r2.thesportsdb.com/" + "a".repeat(1000)), "", "over-long url refused")
 
 console.log("live scores")
 // eventsnext drops a match the moment it starts, so live has its own feed.

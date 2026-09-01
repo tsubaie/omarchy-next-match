@@ -6,7 +6,8 @@ import qs.Ui
 import "Model.js" as Model
 
 // Owns the fixture data: settings, fetching, caching and pacing. BarWidget.qml
-// reads `pillLabel` and `badgeUrl` off this and draws the button.
+// reads `pillLabel`, the two club names and the two crest paths off this and
+// draws the button.
 Panel {
   id: root
   moduleName: "tsubaie.next-match"
@@ -73,14 +74,54 @@ Panel {
     "/.cache/omarchy-next-match/fixture-" + root.teamId + ".json"
   property string fetchUrl: ""
 
-  readonly property string badgeUrl: root.showBadge ? Model.opponentBadge(root.displayFixture, root.teamId) : ""
-
   // The bar draws both clubs, so it needs the parts rather than one string:
   // a crest cannot be interleaved into a Text.
   readonly property string homeName: root.sidesNow ? Model.plainText(root.sidesNow.home.name) : ""
   readonly property string awayName: root.sidesNow ? Model.plainText(root.sidesNow.away.name) : ""
-  readonly property string homeBadgeUrl: root.showBadge && root.displayFixture && root.displayFixture.badges ? root.displayFixture.badges.home : ""
-  readonly property string awayBadgeUrl: root.showBadge && root.displayFixture && root.displayFixture.badges ? root.displayFixture.badges.away : ""
+
+  // ------------------------------------------------------------------- crests
+
+  // Crests are PNGs on a CDN this plugin does not control, and an Image given a
+  // remote source downloads whatever is served: sourceSize caps the decode, not
+  // the transfer. So they are pulled by curl under a byte ceiling and drawn
+  // from disk instead. Keyed by team id, which is stable, so each is fetched
+  // once and survives a restart.
+  readonly property string badgeDir: Quickshell.env("HOME") + "/.cache/omarchy-next-match/badges"
+  property int badgeRevision: 0
+  property string badgeSpec: ""
+
+  function badgeFileUrl(team) {
+    if (!root.showBadge) return ""
+    var n = parseInt(team && team.id, 10)
+    if (!isFinite(n) || n <= 0) return ""
+    // The revision rides along as a fragment: file:// ignores it, while QML
+    // sees a new source and re-reads the file once a fetch has landed.
+    return "file://" + root.badgeDir + "/team-" + n + ".png#" + root.badgeRevision
+  }
+
+  readonly property string homeBadgeUrl: root.sidesNow ? root.badgeFileUrl(root.sidesNow.home) : ""
+  readonly property string awayBadgeUrl: root.sidesNow ? root.badgeFileUrl(root.sidesNow.away) : ""
+
+  // One "<id> <url>" line per crest. Rebuilt whenever the fixture changes; a
+  // spec identical to the last one launches nothing.
+  function syncBadges() {
+    var fx = root.displayFixture
+    if (!root.showBadge || !fx || !fx.teams || !fx.badges || badgeProc.running) return
+    var lines = []
+    function want(team, url) {
+      var n = parseInt(team && team.id, 10)
+      var u = Model.sdbImageUrl(url)
+      if (isFinite(n) && n > 0 && u !== "") lines.push(n + " " + u)
+    }
+    want(fx.teams.home, fx.badges.home)
+    want(fx.teams.away, fx.badges.away)
+    var spec = lines.join("\n")
+    if (spec === "" || spec === root.badgeSpec) return
+    root.badgeSpec = spec
+    badgeProc.running = true
+  }
+
+  onDisplayFixtureChanged: syncBadges()
 
   // "v" normally; the scoreline once it is being played.
   readonly property string barMiddle: {
@@ -137,7 +178,7 @@ Panel {
     if (errorText !== "") return "Next Match — " + errorText
     if (!displayFixture) return "Next Match — nothing scheduled"
     var s = Model.sides(root.displayFixture, root.teamId)
-    return s ? s.home.name + " v " + s.away.name : "Next Match"
+    return s ? Model.plainText(s.home.name) + " v " + Model.plainText(s.away.name) : "Next Match"
   }
 
   // ------------------------------------------------------------------ fetching
@@ -189,6 +230,13 @@ Panel {
       scheduleNext()
       return
     }
+    // One byte over the cap means the body was truncated on the way in. Do not
+    // hand a half-JSON document to the parser.
+    if (Model.oversized(text)) {
+      if (!root.fixture) root.errorText = "Bad response"
+      scheduleNext()
+      return
+    }
     if (Model.rateLimited(text)) {
       // Transient and not the user's doing: keep the last good fixture and
       // come back later rather than replacing it with an error.
@@ -210,7 +258,7 @@ Panel {
   function loadCache(text) {
     if (root.fixture !== null) return
     var raw = String(text || "").trim()
-    if (raw === "") return
+    if (raw === "" || Model.oversized(raw, Model.limits().cacheChars)) return
     try {
       applyPayload(JSON.parse(raw), true)
     } catch (e) {
@@ -228,7 +276,7 @@ Panel {
 
   function onLive(raw) {
     var text = String(raw || "").trim()
-    if (text === "") return
+    if (text === "" || Model.oversized(text)) return
     try {
       var found = Model.sdbLiveForTeam(JSON.parse(text), root.teamId)
       root.liveFixture = found
@@ -259,7 +307,7 @@ Panel {
   onSdbKeyChanged: if (configured) refresh(true)
 
   Component.onCompleted: {
-    cacheFile.reload()
+    cacheProc.running = true
     if (configured) refresh(true)
     scheduleNext()
   }
@@ -295,13 +343,22 @@ Panel {
 
   // ---------------------------------------------------------------------- I/O
 
-  FileView {
-    id: cacheFile
-    path: root.cachePath
-    watchChanges: false
-    printErrors: false
-    onLoaded: root.loadCache(text())
-    onLoadFailed: function(error) { /* no cache yet; the first fetch writes one */ }
+  // Read through head rather than a FileView, so the read is bounded at the
+  // source: a cache file that grew — or that something else replaced — is
+  // truncated on the way in instead of being pulled into memory whole and
+  // measured afterwards. A missing file is the normal first run, not an error.
+  Process {
+    id: cacheProc
+    running: false
+    command: ["bash", "-c", 'head -c $((NM_MAX + 1)) "$NM_CACHE" 2>/dev/null || true']
+    environment: ({
+      "NM_CACHE": root.cachePath,
+      "NM_MAX": String(Model.limits().cacheChars)
+    })
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.loadCache(text)
+    }
   }
 
   // The URL travels in the environment and reaches curl through a config file
@@ -310,7 +367,11 @@ Panel {
     id: fetchProc
     running: false
     command: ["bash", "-c", root.fetchScript]
-    environment: ({ "NM_URL": root.fetchUrl, "NM_CACHE": root.cachePath })
+    environment: ({
+      "NM_URL": root.fetchUrl,
+      "NM_CACHE": root.cachePath,
+      "NM_MAX": String(Model.limits().responseChars)
+    })
     onRunningChanged: {
       if (!running && root.pendingRefresh) {
         root.pendingRefresh = false
@@ -325,11 +386,14 @@ Panel {
     }
   }
 
+  // curl caps what it will accept and head caps what survives a server that
+  // declares no length at all; one byte over the limit is read deliberately, so
+  // the QML side can tell a truncated body from one that merely fits.
   readonly property string fetchScript:
-    'out=$(printf \'url = "%s"\\n\' "$NM_URL" | curl -fsS --max-time 20 -K -) || out=""\n' +
-    // Preserve the last good cache on HTML/rate-limit/malformed responses.
-    // events:null is a valid "nothing scheduled" response.
-    'if [ -n "$out" ] && printf %s "$out" | jq -e \'type == "object" and ((has("events") and ((.events == null) or (.events | type == "array"))) or (has("results") and (.results | type == "array")))\' >/dev/null 2>&1; then mkdir -p "$(dirname "$NM_CACHE")" && printf %s "$out" > "$NM_CACHE".tmp && mv -f "$NM_CACHE".tmp "$NM_CACHE"; fi\n' +
+    'out=$(printf \'url = "%s"\\n\' "$NM_URL" | curl -fsS --max-time 20 --max-filesize "$NM_MAX" -K - | head -c $((NM_MAX + 1)))\n' +
+    // Preserve the last good cache on HTML/rate-limit/malformed/oversized
+    // responses. events:null is a valid "nothing scheduled" response.
+    'if [ -n "$out" ] && [ ${#out} -le "$NM_MAX" ] && printf %s "$out" | jq -e \'type == "object" and ((has("events") and ((.events == null) or (.events | type == "array"))) or (has("results") and (.results | type == "array")))\' >/dev/null 2>&1; then mkdir -p "$(dirname "$NM_CACHE")" && printf %s "$out" > "$NM_CACHE".tmp && mv -f "$NM_CACHE".tmp "$NM_CACHE"; fi\n' +
     'printf %s "$out"\n'
 
   // ------------------------------------------------------------------ settings
@@ -361,12 +425,15 @@ Panel {
   property string pendingBrowseKind: ""
   property string pendingBrowseUrl: ""
 
+  // Capped: a Repeater builds one Button per row, so the row count is a
+  // rendering cost, not just a list length.
   readonly property var visibleRows: {
     var q = String(filterField.text).trim()
     var src = root.browseStage === "country" ? root.countryList : root.sortedTeams
-    if (q === "") return src
+    if (q === "") return Model.boundList(src)
     var out = []
-    for (var i = 0; i < src.length; ++i)
+    var cap = Model.limits().rows
+    for (var i = 0; i < src.length && out.length < cap; ++i)
       if (Model.matchesQuery(src[i].name, q)) out.push(src[i])
     return out
   }
@@ -409,7 +476,10 @@ Panel {
   // but not Al-Hilal. Per league it is ten each, which between them covers the
   // clubs anyone is actually looking for.
   function chooseCountry(name) {
-    root.chosenCountry = name
+    // The single place a country name enters widget state, from the API list or
+    // from the field. Flattened and clamped here so every label, placeholder
+    // and note built from it downstream is already inside the boundary.
+    root.chosenCountry = Model.plainText(name)
     root.browseStage = "team"
     root.teamList = []
     root.loadQueue = []
@@ -487,6 +557,11 @@ Panel {
   function onBrowsed(raw) {
     root.browsing = false
     var text = String(raw || "").trim()
+    if (Model.oversized(text)) {
+      root.loadQueue = []
+      root.browseNote = root.teamList.length > 0 ? "" : "That response was too large to read."
+      return
+    }
     if (Model.rateLimited(text)) {
       root.loadQueue = []
       root.browseNote = "TheSportsDB is rate-limiting its shared key. Wait a minute and try again."
@@ -547,7 +622,7 @@ Panel {
   function pickTeam(id, name) {
     root.browseNote = ""
     filterField.text = ""
-    root.savedNote = "Now following " + name
+    root.savedNote = "Now following " + Model.plainText(name)
     savedNoteTimer.restart()
     root.errorText = ""
     persistSettings({ teamId: id })
@@ -574,11 +649,39 @@ Panel {
     onTriggered: root.savedNote = ""
   }
 
+  // Each crest is fetched at most once. curl refuses anything over the ceiling,
+  // and the size is checked again before the file is moved into place, because
+  // --max-filesize only acts on a length the server actually declares.
+  Process {
+    id: badgeProc
+    running: false
+    command: ["bash", "-c", root.badgeScript]
+    environment: ({
+      "NM_SPEC": root.badgeSpec,
+      "NM_DIR": root.badgeDir,
+      "NM_MAX": String(Model.limits().imageBytes)
+    })
+    onExited: root.badgeRevision++
+  }
+
+  readonly property string badgeScript:
+    'mkdir -p "$NM_DIR" || exit 0\n' +
+    // %s\n, not %s: read gives up on a final line with no newline after it,
+    // which would silently skip the away crest.
+    'printf \'%s\\n\' "$NM_SPEC" | while read -r id url; do\n' +
+    '  [ -n "$id" ] && [ -n "$url" ] || continue\n' +
+    '  out="$NM_DIR/team-$id.png"\n' +
+    '  [ -s "$out" ] && continue\n' +
+    '  curl -fsS --max-time 15 --max-filesize "$NM_MAX" -o "$out.part" "$url" || { rm -f "$out.part"; continue; }\n' +
+    '  if [ "$(wc -c < "$out.part")" -le "$NM_MAX" ]; then mv -f "$out.part" "$out"; else rm -f "$out.part"; fi\n' +
+    'done\n'
+
   Process {
     id: liveProc
     running: false
-    command: ["bash", "-c", 'printf \'url = "%s"\\n\' "$NM_URL" | curl -fsS --max-time 20 -K -']
-    environment: ({ "NM_URL": root.liveUrl })
+    command: ["bash", "-c",
+      'printf \'url = "%s"\\n\' "$NM_URL" | curl -fsS --max-time 20 --max-filesize "$NM_MAX" -K - | head -c $((NM_MAX + 1))']
+    environment: ({ "NM_URL": root.liveUrl, "NM_MAX": String(Model.limits().responseChars) })
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.onLive(text)
@@ -588,8 +691,9 @@ Panel {
   Process {
     id: browseProc
     running: false
-    command: ["bash", "-c", 'printf \'url = "%s"\\n\' "$NM_URL" | curl -fsS --max-time 25 -K -']
-    environment: ({ "NM_URL": root.browseUrl })
+    command: ["bash", "-c",
+      'printf \'url = "%s"\\n\' "$NM_URL" | curl -fsS --max-time 25 --max-filesize "$NM_MAX" -K - | head -c $((NM_MAX + 1))']
+    environment: ({ "NM_URL": root.browseUrl, "NM_MAX": String(Model.limits().responseChars) })
     onRunningChanged: {
       if (!running && root.pendingBrowseUrl !== "") {
         var kind = root.pendingBrowseKind
@@ -666,7 +770,7 @@ Panel {
           visible: root.settingsOpen
 
           Text {
-            text: root.browseStage === "country" ? "Pick a country" : root.chosenCountry
+            text: root.browseStage === "country" ? "Pick a country" : Model.plainText(root.chosenCountry)
             textFormat: Text.PlainText
             color: root.fg
             font.family: root.fontFam
@@ -695,7 +799,9 @@ Panel {
               id: filterField
               width: parent.width - (backBtn.visible ? backBtn.width + Style.space(6) : 0)
                      - (findBtn.visible ? findBtn.width + Style.space(6) : 0)
-              placeholderText: root.browseStage === "country" ? "filter countries" : "type any club in " + root.chosenCountry
+              placeholderText: root.browseStage === "country"
+                               ? "filter countries"
+                               : "type any club in " + Model.plainText(root.chosenCountry)
               foreground: root.fg
               font.family: root.fontFam
               font.pixelSize: Style.font.bodySmall
@@ -728,7 +834,7 @@ Panel {
                      && String(filterField.text).trim().length >= 3
                      && root.visibleRows.length === 0
             bordered: true
-            text: "Look up country \"" + String(filterField.text).trim() + "\""
+            text: "Look up country \"" + Model.plainText(String(filterField.text).trim(), 48) + "\""
             foreground: root.fg
             fontFamily: root.fontFam
             fontSize: Style.font.bodySmall
@@ -789,8 +895,9 @@ Panel {
                   bordered: false
                   // The league disambiguates: a country list carries both
                   // "Al-Hilal" and "Al Hilal Women".
-                  text: modelData.name
-                        + (root.browseStage === "team" && modelData.code ? "   ·   " + modelData.code : "")
+                  text: Model.plainText(modelData.name)
+                        + (root.browseStage === "team" && modelData.code
+                           ? "   ·   " + Model.plainText(modelData.code) : "")
                   foreground: root.fg
                   fontFamily: root.fontFam
                   fontSize: Style.font.bodySmall
@@ -873,7 +980,7 @@ Panel {
               sourceSize.width: Style.space(56)
               sourceSize.height: Style.space(56)
               visible: source != "" && status === Image.Ready
-              source: root.fixture && root.fixture.badges ? root.fixture.badges.home : ""
+              source: root.homeBadgeUrl
             }
 
             Text {
@@ -901,7 +1008,7 @@ Panel {
               sourceSize.width: Style.space(56)
               sourceSize.height: Style.space(56)
               visible: source != "" && status === Image.Ready
-              source: root.fixture && root.fixture.badges ? root.fixture.badges.away : ""
+              source: root.awayBadgeUrl
             }
           }
 
