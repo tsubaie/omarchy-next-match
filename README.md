@@ -3,7 +3,7 @@
 **Your team's next fixture in the bar, with both crests, counting down to
 kick-off.**
 
-<img src="docs/bar.png" alt="Al-Hilal v Al-Ahli, Today 09:00 PM, in the Omarchy bar" width="386">
+<img src="docs/bar.png" alt="Al-Hilal v Al-Ahli, Today 09:00 PM, in the Omarchy bar" width="610">
 
 A bar widget for the [Omarchy](https://omarchy.org) shell. Pick your club and
 it just runs — **no API key, no account, nothing to paste.** Data comes from
@@ -54,7 +54,7 @@ Click it for the fixture in full — competition and round, both crests and
 names, kick-off in your local time, venue, home or away. Middle click forces a
 refresh.
 
-<img src="docs/panel.png" alt="The panel: Saudi-Arabian Pro League, Round 3, Al-Hilal v Al-Ahli with crests, Tuesday 1 September 09:00 PM, Kingdom Arena, Home" width="457">
+<img src="docs/panel.png" alt="The panel: Saudi-Arabian Pro League, Round 3, Al-Hilal v Al-Ahli with crests, Tuesday 1 September 09:00 PM, Kingdom Arena, Home" width="718">
 
 ### Which competitions
 
