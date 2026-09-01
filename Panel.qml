@@ -384,6 +384,9 @@ Panel {
   // can say whether it is still working or has finished and found nothing.
   // Without this the placeholder said "Searching…" forever.
   property string searchState: "idle"
+  // Set when a search found clubs but all of them are in other countries, so
+  // the empty list can explain itself instead of just being empty.
+  property bool searchForeignOnly: false
 
   function runTeamSearch() {
     if (root.searchVariants.length === 0) {
@@ -421,6 +424,7 @@ Panel {
       if (hits.length === 0) { runTeamSearch(); return }
       root.searchVariants = []
       root.searchState = "done"
+      root.searchForeignOnly = Model.foreignOnly(hits, root.chosenCountry)
       root.teamList = Model.mergeTeams(root.teamList, hits, root.chosenCountry)
       root.browseNote = ""
     } else {
@@ -580,6 +584,7 @@ Panel {
               onTextChanged: {
                 if (root.browseStage !== "team") return
                 root.searchState = "idle"
+                root.searchForeignOnly = false
                 autoSearchTimer.restart()
               }
             }
@@ -620,24 +625,11 @@ Panel {
             textFormat: Text.PlainText
             text: String(filterField.text).trim().length < 3
                   ? "Keep typing — three letters searches beyond the listed clubs."
-                  : (root.searchState === "done"
-                     ? "No club found for \"" + String(filterField.text).trim() + "\". Try more of the name."
-                     : "Searching…")
-            color: Qt.darker(root.fg, 1.5)
-            font.family: root.fontFam
-            font.pixelSize: Style.font.caption
-          }
-
-          // Say when the only matches are elsewhere, so a search for "nass"
-          // that answers with a Swedish club does not read as a broken widget.
-          Text {
-            width: body.width
-            visible: root.browseStage === "team" && root.searchState === "done"
-                     && Model.noneFromCountry(root.visibleRows, root.chosenCountry)
-            wrapMode: Text.WordWrap
-            textFormat: Text.PlainText
-            text: "Nothing in " + root.chosenCountry + " matched that — try more of the name. "
-                  + "The clubs below are from elsewhere."
+                  : (root.searchState !== "done"
+                     ? "Searching…"
+                     : (root.searchForeignOnly
+                        ? "Nothing in " + root.chosenCountry + " matched that. The search wants most of the name — try \"nassr\" rather than \"nass\"."
+                        : "No club in " + root.chosenCountry + " found for \"" + String(filterField.text).trim() + "\"."))
             color: Qt.darker(root.fg, 1.5)
             font.family: root.fontFam
             font.pixelSize: Style.font.caption
@@ -679,7 +671,6 @@ Panel {
                   // The league disambiguates: a country list carries both
                   // "Al-Hilal" and "Al Hilal Women".
                   text: modelData.name
-                        + (root.browseStage === "team" && modelData.country ? "   ·   " + modelData.country : "")
                         + (root.browseStage === "team" && modelData.code ? "   ·   " + modelData.code : "")
                   foreground: root.fg
                   fontFamily: root.fontFam

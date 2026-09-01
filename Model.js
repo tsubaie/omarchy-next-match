@@ -323,15 +323,17 @@ function sides(fx, teamId) {
   }
 }
 
-// Merge search results with the browsed list, search hits first. Country is not
-// used to filter: a search for "nass" legitimately turns up Nässjö in Sweden,
-// and hiding it leaves the user staring at an empty list wondering what they
-// typed wrong. The country is shown on each row instead.
-function mergeTeams(existing, found, preferCountry) {
+// Merge search results into the browsed list, search hits first, scoped to the
+// country the user picked — they said which one they meant, so a Swedish club
+// answering a search for a Saudi one is noise. When that leaves nothing, the
+// caller says so rather than showing a blank list (see `foreignOnly`).
+function mergeTeams(existing, found, country) {
   var out = []
   var seen = {}
+  var want = normalizeName(country)
   function add(t) {
     if (!t || !t.id) return
+    if (want !== "" && normalizeName(t.country) !== want) return
     if (seen[t.id]) return
     seen[t.id] = true
     out.push(t)
@@ -340,24 +342,17 @@ function mergeTeams(existing, found, preferCountry) {
   var b = Array.isArray(found) ? found : []
   for (var i = 0; i < b.length; ++i) add(b[i])
   for (var j = 0; j < a.length; ++j) add(a[j])
-
-  // Clubs from the country you picked float up; the rest stay, because a
-  // near-miss in another country is still information about what you typed.
-  var want = normalizeName(preferCountry)
-  if (want === "") return out
-  var mine = [], others = []
-  for (var k = 0; k < out.length; ++k)
-    (normalizeName(out[k].country) === want ? mine : others).push(out[k])
-  return mine.concat(others)
+  return out
 }
 
-// True when a search found clubs but none in the country being browsed — the
-// case where "nass" answers with Nässjö in Sweden and the user meant Al-Nassr.
-function noneFromCountry(rows, country) {
+// True when a search did find clubs, but every one of them is somewhere else —
+// "nass" answers with Nässjö in Sweden when Al-Nassr was meant. Worth telling
+// the user, because it means the query was too short rather than wrong.
+function foreignOnly(hits, country) {
   var want = normalizeName(country)
-  if (want === "" || !Array.isArray(rows) || rows.length === 0) return false
-  for (var i = 0; i < rows.length; ++i)
-    if (normalizeName(rows[i].country) === want) return false
+  if (want === "" || !Array.isArray(hits) || hits.length === 0) return false
+  for (var i = 0; i < hits.length; ++i)
+    if (normalizeName(hits[i].country) === want) return false
   return true
 }
 
@@ -609,7 +604,7 @@ if (typeof module !== "undefined") {
     shortCode: shortCode,
     sides: sides,
     mergeTeams: mergeTeams,
-    noneFromCountry: noneFromCountry,
+    foreignOnly: foreignOnly,
     opponentBadge: opponentBadge,
     countdown: countdown,
     timingLabel: timingLabel,

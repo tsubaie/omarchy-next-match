@@ -126,24 +126,20 @@ console.log("merging search into the browsed list")
   const found = [{ id: 3, name: "Al-Nassr", country: "Saudi Arabia" },
                  { id: 9, name: "Liverpool", country: "England" },
                  { id: 2, name: "Al-Ahli", country: "Saudi Arabia" }]
-  const merged = M.mergeTeams(browsed, found)
-  eq(merged.map(t => t.name), ["Al-Nassr", "Liverpool", "Al-Ahli", "Abha"],
-     "search hits lead, then the browsed list")
+  const merged = M.mergeTeams(browsed, found, "Saudi Arabia")
+  eq(merged.map(t => t.name), ["Al-Nassr", "Al-Ahli", "Abha"],
+     "a club past the ten-item cap is reachable, search hits first")
+  eq(merged.some(t => t.country === "England"), false, "another country's club is not listed")
   eq(merged.filter(t => t.name === "Al-Ahli").length, 1, "no duplicate from both routes")
-  // A search for "nass" turns up Nässjö in Sweden. Hiding it for being in the
-  // wrong country left the user staring at an empty list.
-  eq(M.mergeTeams([], [{ id: 5, name: "Nässjö", country: "Sweden" }]).length, 1,
-     "a hit from another country is kept, not discarded")
-  eq(M.mergeTeams(null, null), [], "nothing at all")
-  // The country you picked floats up, but a foreign near-miss is still shown.
-  eq(M.mergeTeams([], [{ id: 5, name: "Nässjö", country: "Sweden" },
-                        { id: 6, name: "Al-Nassr", country: "Saudi Arabia" }], "Saudi Arabia")
-     .map(t => t.name), ["Al-Nassr", "Nässjö"], "chosen country first")
-  eq(M.noneFromCountry([{ name: "Nässjö", country: "Sweden" }], "Saudi Arabia"), true,
-     "only foreign matches -> say so")
-  eq(M.noneFromCountry([{ name: "Al-Nassr", country: "Saudi Arabia" }], "Saudi Arabia"), false,
-     "a local match -> nothing to explain")
-  eq(M.noneFromCountry([], "Saudi Arabia"), false, "an empty list is a different message")
+  eq(M.mergeTeams(null, null, "Spain"), [], "nothing at all")
+
+  // "nass" answers with a Swedish club when Al-Nassr was meant: nothing to
+  // show, but the reason is worth saying.
+  const swedish = [{ id: 5, name: "Nässjö", country: "Sweden" }]
+  eq(M.mergeTeams([], swedish, "Saudi Arabia"), [], "out-of-country hits are not listed")
+  eq(M.foreignOnly(swedish, "Saudi Arabia"), true, "but the caller can explain why")
+  eq(M.foreignOnly(found, "Saudi Arabia"), false, "a local hit needs no explanation")
+  eq(M.foreignOnly([], "Saudi Arabia"), false, "no hits at all is a different message")
 }
 
 console.log("selection")
