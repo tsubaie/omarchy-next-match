@@ -232,5 +232,29 @@ eq(M.rateLimited("\nerror code: 1015\n"), true, "with whitespace")
 eq(M.rateLimited('{"teams":[]}'), false, "real JSON is not a rate limit")
 eq(M.rateLimited(""), false, "empty")
 
+console.log("today / tomorrow")
+{
+  // Compared on calendar days, not elapsed hours: a 00:30 kick-off tonight is
+  // "Tomorrow", even though it is only six hours away.
+  const now = new Date(2026, 8, 1, 18, 0).getTime()
+  const at = (y, mo, d, h, mi) => new Date(y, mo, d, h, mi).getTime()
+  eq(M.dayKind(at(2026, 8, 1, 21, 0), now), "today", "later tonight")
+  eq(M.dayKind(at(2026, 8, 1, 18, 1), now), "today", "a minute from now")
+  eq(M.dayKind(at(2026, 8, 2, 0, 30), now), "tomorrow", "after midnight is tomorrow, not today")
+  eq(M.dayKind(at(2026, 8, 2, 23, 0), now), "tomorrow", "late tomorrow")
+  eq(M.dayKind(at(2026, 8, 4, 21, 0), now), "other", "three days out gets a weekday")
+  eq(M.dayKind(NaN, now), "other", "no date")
+}
+
+console.log("punctuation-insensitive matching")
+// Without this the club a search just found is hidden again by the query that
+// found it: "Al Nassr" does not substring-match "Al-Nassr".
+eq(M.matchesQuery("Al-Nassr", "Al Nassr"), true, "spaces match hyphens")
+eq(M.matchesQuery("Al Nassr", "al-nassr"), true, "and the other way round")
+eq(M.matchesQuery("Liverpool", "liv"), true, "prefix")
+eq(M.matchesQuery("Liverpool", "xyz"), false, "no match")
+eq(M.matchesQuery("Al-Hilal", ""), true, "an empty query matches everything")
+eq(M.normalizeName("Al-Hilal SFC!"), "alhilalsfc", "normalized")
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail === 0 ? 0 : 1)

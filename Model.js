@@ -404,6 +404,36 @@ function timingLabel(deltaMs, whenText) {
   return "in " + countdown(deltaMs)
 }
 
+// "Today" and "Tomorrow" beat a weekday name for the two days you are most
+// likely to be asking about: on Tuesday, "Tue 09:00 PM" makes you check whether
+// it means today or next week. Compared on local calendar days, not on elapsed
+// hours, so a match at 00:30 tonight is still "Tomorrow".
+function dayKind(koMs, nowMs) {
+  if (!isFinite(koMs) || !isFinite(nowMs)) return "other"
+  var ko = new Date(koMs)
+  var now = new Date(nowMs)
+  var koDay = new Date(ko.getFullYear(), ko.getMonth(), ko.getDate()).getTime()
+  var nowDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+  var diff = Math.round((koDay - nowDay) / 86400000)
+  if (diff === 0) return "today"
+  if (diff === 1) return "tomorrow"
+  return "other"
+}
+
+// Matching that ignores punctuation and case, so filtering a list for
+// "Al Nassr" still finds "Al-Nassr" — otherwise the very query that found a
+// club hides it again.
+function normalizeName(value) {
+  return String(value === undefined || value === null ? "" : value)
+    .toLowerCase().replace(/[^a-z0-9]+/g, "")
+}
+
+function matchesQuery(name, query) {
+  var q = normalizeName(query)
+  if (q === "") return true
+  return normalizeName(name).indexOf(q) !== -1
+}
+
 // ------------------------------------------------------------------- pill label
 
 // Adaptive: a date while the match is far off, a countdown once it is close
@@ -555,6 +585,9 @@ if (typeof module !== "undefined") {
     opponentBadge: opponentBadge,
     countdown: countdown,
     timingLabel: timingLabel,
+    dayKind: dayKind,
+    normalizeName: normalizeName,
+    matchesQuery: matchesQuery,
     whenLabel: whenLabel,
     pillLabel: pillLabel,
     refreshMinutes: refreshMinutes,

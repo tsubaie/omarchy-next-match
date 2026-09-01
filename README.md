@@ -21,7 +21,9 @@ Past a week the exact time stops mattering and a distance reads better:
 
 | Until kick-off | Trailing |
 |----------------|----------|
-| Less than 7 days | `Sun 08:30 PM` |
+| Today | `Today 09:00 PM` |
+| Tomorrow | `Tomorrow 06:00 PM` |
+| Later this week | `Sun 08:30 PM` |
 | Weeks | `in 2 weeks` |
 | Months | `in 3 months` |
 | Being played | the score replaces the `v`, with the minute: `Al-Hilal 2 - 1 Al-Ahli 67'` |

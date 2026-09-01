@@ -105,7 +105,11 @@ Panel {
   readonly property string whenText: {
     var ko = Model.kickoffMs(root.displayFixture)
     if (!isFinite(ko)) return ""
-    return Qt.formatDateTime(new Date(ko), "ddd hh:mm AP")
+    var d = new Date(ko)
+    var kind = Model.dayKind(ko, root.nowMs)
+    var day = kind === "today" ? "Today"
+            : (kind === "tomorrow" ? "Tomorrow" : Qt.formatDateTime(d, "ddd"))
+    return day + " " + Qt.formatDateTime(d, "hh:mm AP")
   }
 
   readonly property string pillLabel: {
@@ -319,14 +323,12 @@ Panel {
   property string browseKind: ""
 
   readonly property var visibleRows: {
-    var q = String(filterField.text).trim().toLowerCase()
+    var q = String(filterField.text).trim()
     var src = root.browseStage === "country" ? root.countryList : root.teamList
     if (q === "") return src
     var out = []
-    for (var i = 0; i < src.length; ++i) {
-      var name = String(src[i].name || "").toLowerCase()
-      if (name.indexOf(q) !== -1) out.push(src[i])
-    }
+    for (var i = 0; i < src.length; ++i)
+      if (Model.matchesQuery(src[i].name, q)) out.push(src[i])
     return out
   }
 
@@ -432,6 +434,20 @@ Panel {
     root.errorText = ""
     persistSettings({ teamId: id })
     root.showSettings = false
+  }
+
+  // The shared key returns only ten clubs per country, so typing a club that is
+  // not among them would otherwise just empty the list. When the local filter
+  // comes up short, the name search runs on its own — no button to discover.
+  Timer {
+    id: autoSearchTimer
+    interval: 450
+    onTriggered: {
+      if (root.browseStage !== "team") return
+      if (String(filterField.text).trim().length < 3) return
+      if (root.visibleRows.length > 0 || root.browsing) return
+      root.searchTeamsByName()
+    }
   }
 
   Timer {
@@ -551,11 +567,12 @@ Panel {
               id: filterField
               width: parent.width - (backBtn.visible ? backBtn.width + Style.space(6) : 0)
                      - (findBtn.visible ? findBtn.width + Style.space(6) : 0)
-              placeholderText: root.browseStage === "country" ? "filter countries" : "filter, or type a club and press Enter"
+              placeholderText: root.browseStage === "country" ? "filter countries" : "type any club in " + root.chosenCountry
               foreground: root.fg
               font.family: root.fontFam
               font.pixelSize: Style.font.bodySmall
               onAccepted: if (root.browseStage === "team") root.searchTeamsByName()
+              onTextChanged: if (root.browseStage === "team") autoSearchTimer.restart()
             }
 
             Button {
@@ -583,6 +600,21 @@ Panel {
             fontFamily: root.fontFam
             fontSize: Style.font.bodySmall
             onClicked: root.chooseCountry(String(filterField.text).trim())
+          }
+
+          Text {
+            width: body.width
+            visible: root.browseStage === "team" && root.browseNote === ""
+                     && root.visibleRows.length === 0
+                     && String(filterField.text).trim().length > 0
+            wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
+            text: String(filterField.text).trim().length < 3
+                  ? "Keep typing — three letters searches beyond the listed clubs."
+                  : "Searching…"
+            color: Qt.darker(root.fg, 1.5)
+            font.family: root.fontFam
+            font.pixelSize: Style.font.caption
           }
 
           Text {
