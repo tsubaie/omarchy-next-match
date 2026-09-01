@@ -324,7 +324,7 @@ Panel {
 
   readonly property var visibleRows: {
     var q = String(filterField.text).trim()
-    var src = root.browseStage === "country" ? root.countryList : root.teamList
+    var src = root.browseStage === "country" ? root.countryList : root.sortedTeams
     if (q === "") return src
     var out = []
     for (var i = 0; i < src.length; ++i)
@@ -356,13 +356,43 @@ Panel {
     browseProc.running = true
   }
 
+  // A country's club list is assembled from its leagues rather than from the
+  // one country-wide call, because that call returns ten clubs alphabetically —
+  // for Saudi Arabia it stops at Al-Bukiryah, so it has "Al Hilal Women" in it
+  // but not Al-Hilal. Per league it is ten each, which between them covers the
+  // clubs anyone is actually looking for.
   function chooseCountry(name) {
     root.chosenCountry = name
     root.browseStage = "team"
     root.teamList = []
+    root.loadQueue = []
     root.searchState = "idle"
+    root.searchForeignOnly = false
     filterField.text = ""
-    fetchBrowse("team", Model.sdbCountryTeamsUrl(root.sdbKey, name))
+    fetchBrowse("leagues", Model.sdbLeaguesUrl(root.sdbKey, name))
+  }
+
+  readonly property var sortedTeams: {
+    var copy = (root.teamList || []).slice()
+    copy.sort(function(a, b) {
+      var x = Model.normalizeName(a.name), y = Model.normalizeName(b.name)
+      return x < y ? -1 : (x > y ? 1 : 0)
+    })
+    return copy
+  }
+
+  function drainQueue() {
+    if (root.loadQueue.length === 0) {
+      root.browsing = false
+      root.browseNote = root.teamList.length === 0
+        ? "No clubs listed for " + root.chosenCountry + "."
+        : ""
+      return
+    }
+    var rest = root.loadQueue.slice()
+    var next = rest.shift()
+    root.loadQueue = rest
+    fetchBrowse("team", next)
   }
 
   // The shared key returns only ten clubs per country, alphabetically — the
@@ -380,6 +410,8 @@ Panel {
   }
 
   property var searchVariants: []
+  // Remaining club-list requests for the country being opened.
+  property var loadQueue: []
   // "idle" until a search runs, then "running", then "done" — so an empty list
   // can say whether it is still working or has finished and found nothing.
   // Without this the placeholder said "Searching…" forever.
@@ -409,16 +441,32 @@ Panel {
     root.browsing = false
     var text = String(raw || "").trim()
     if (Model.rateLimited(text)) {
+      root.loadQueue = []
       root.browseNote = "TheSportsDB is rate-limiting its shared key. Wait a minute and try again."
       return
     }
     var payload = null
     if (text !== "") { try { payload = JSON.parse(text) } catch (e) { payload = null } }
-    if (!payload) { root.browseNote = "Could not load — check your connection"; return }
+    if (!payload) {
+      // One competition failing is not a reason to abandon the others.
+      if (root.browseKind === "team" && root.loadQueue.length > 0) { drainQueue(); return }
+      root.browseNote = root.teamList.length > 0 ? "" : "Could not load — check your connection"
+      return
+    }
 
     if (root.browseKind === "country") {
       root.countryList = Model.sdbCountries(payload)
       root.browseNote = root.countryList.length === 0 ? "No countries returned" : ""
+    } else if (root.browseKind === "leagues") {
+      var leagues = Model.sdbLeagues(payload)
+      var queue = []
+      // A handful of competitions is plenty: the cups repeat the same clubs.
+      for (var li = 0; li < leagues.length && li < 8; ++li)
+        queue.push(Model.sdbLeagueTeamsUrl(root.sdbKey, leagues[li].name))
+      queue.push(Model.sdbCountryTeamsUrl(root.sdbKey, root.chosenCountry))
+      root.loadQueue = queue
+      root.browseNote = "Loading clubs…"
+      drainQueue()
     } else if (root.browseKind === "search") {
       var hits = Model.sdbTeams(payload)
       if (hits.length === 0) { runTeamSearch(); return }
@@ -428,10 +476,8 @@ Panel {
       root.teamList = Model.mergeTeams(root.teamList, hits, root.chosenCountry)
       root.browseNote = ""
     } else {
-      root.teamList = Model.sdbTeams(payload)
-      root.browseNote = root.teamList.length === 0
-        ? "No clubs listed for " + root.chosenCountry + ". Try a different spelling."
-        : ""
+      root.teamList = Model.mergeTeams(root.teamList, Model.sdbTeams(payload), root.chosenCountry)
+      drainQueue()
     }
   }
 
