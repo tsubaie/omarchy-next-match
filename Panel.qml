@@ -51,6 +51,12 @@ Panel {
   property string errorText: ""
   property double lastFetchMs: 0
   property bool fetching: false
+  // The process is intentionally single-flight. Remember which settings
+  // launched it, and queue a replacement when they change mid-request so an
+  // old team's response can never be applied to the new team.
+  property int fetchTeamId: 0
+  property string fetchKey: ""
+  property bool pendingRefresh: false
   property string lastUrl: ""
   property double lastUrlAt: 0
 
@@ -61,7 +67,10 @@ Panel {
   readonly property bool idle: configured && errorText === "" && fixture === null
   readonly property bool needsAttention: !configured || errorText !== ""
 
-  readonly property string cachePath: Quickshell.env("HOME") + "/.cache/omarchy-next-match/fixture.json"
+  // Fixtures are team-specific. A shared filename can briefly show the
+  // previously selected club after a restart or an offline team change.
+  readonly property string cachePath: Quickshell.env("HOME") +
+    "/.cache/omarchy-next-match/fixture-" + root.teamId + ".json"
   property string fetchUrl: ""
 
   readonly property string badgeUrl: root.showBadge ? Model.opponentBadge(root.displayFixture, root.teamId) : ""
@@ -134,7 +143,12 @@ Panel {
   // ------------------------------------------------------------------ fetching
 
   function refresh(force) {
-    if (!configured || fetchProc.running) return
+    if (!configured) return
+    if (fetchProc.running) {
+      if (root.fetchTeamId !== root.teamId || root.fetchKey !== root.sdbKey)
+        root.pendingRefresh = true
+      return
+    }
     // A reload storm (theme switch, plugin rescan) must not re-fetch on every
     // pass: ignore anything inside a minute unless a human asked.
     if (!force && root.lastFetchMs > 0 && Date.now() - root.lastFetchMs < 60000) return
@@ -143,19 +157,30 @@ Panel {
     root.lastUrl = url
     root.lastUrlAt = Date.now()
     root.fetchUrl = url
+    root.fetchTeamId = root.teamId
+    root.fetchKey = root.sdbKey
     root.fetching = true
     fetchProc.running = true
   }
 
   function applyPayload(payload, fromCache) {
+    var next = Model.pickNextFixture(Model.sdbFixtures(payload), Date.now())
+    if (next !== null && !Model.fixtureHasTeam(next, root.teamId)) return false
     root.errorText = ""
-    root.fixture = Model.pickNextFixture(Model.sdbFixtures(payload), Date.now())
+    root.fixture = next
     if (!fromCache) root.lastFetchMs = Date.now()
     scheduleNext()
+    return true
   }
 
   function onFetched(raw) {
     root.fetching = false
+    // Settings may have changed while curl was in flight. Its output and cache
+    // belong to the captured request, not to whatever is selected now.
+    if (root.fetchTeamId !== root.teamId || root.fetchKey !== root.sdbKey) {
+      root.pendingRefresh = true
+      return
+    }
     var text = String(raw || "").trim()
     if (text === "") {
       // curl failed (offline, DNS, timeout). Keep the last good fixture rather
@@ -172,7 +197,10 @@ Panel {
       return
     }
     try {
-      applyPayload(JSON.parse(text), false)
+      if (!applyPayload(JSON.parse(text), false)) {
+        root.errorText = "Bad response"
+        scheduleNext()
+      }
     } catch (e) {
       root.errorText = "Bad response"
       scheduleNext()
@@ -228,6 +256,7 @@ Panel {
     root.errorText = ""
     if (configured) refresh(true)
   }
+  onSdbKeyChanged: if (configured) refresh(true)
 
   Component.onCompleted: {
     cacheFile.reload()
@@ -282,6 +311,12 @@ Panel {
     running: false
     command: ["bash", "-c", root.fetchScript]
     environment: ({ "NM_URL": root.fetchUrl, "NM_CACHE": root.cachePath })
+    onRunningChanged: {
+      if (!running && root.pendingRefresh) {
+        root.pendingRefresh = false
+        Qt.callLater(function() { root.refresh(true) })
+      }
+    }
     // onStreamFinished fires even when curl dies early, with empty text, so
     // there is no need for an onExited handler to clear `fetching` as well.
     stdout: StdioCollector {
@@ -292,7 +327,9 @@ Panel {
 
   readonly property string fetchScript:
     'out=$(printf \'url = "%s"\\n\' "$NM_URL" | curl -fsS --max-time 20 -K -) || out=""\n' +
-    'if [ -n "$out" ]; then mkdir -p "$(dirname "$NM_CACHE")" && printf %s "$out" > "$NM_CACHE".tmp && mv -f "$NM_CACHE".tmp "$NM_CACHE"; fi\n' +
+    // Preserve the last good cache on HTML/rate-limit/malformed responses.
+    // events:null is a valid "nothing scheduled" response.
+    'if [ -n "$out" ] && printf %s "$out" | jq -e \'type == "object" and ((has("events") and ((.events == null) or (.events | type == "array"))) or (has("results") and (.results | type == "array")))\' >/dev/null 2>&1; then mkdir -p "$(dirname "$NM_CACHE")" && printf %s "$out" > "$NM_CACHE".tmp && mv -f "$NM_CACHE".tmp "$NM_CACHE"; fi\n' +
     'printf %s "$out"\n'
 
   // ------------------------------------------------------------------ settings
@@ -321,6 +358,8 @@ Panel {
   property bool browsing: false
   property string browseUrl: ""
   property string browseKind: ""
+  property string pendingBrowseKind: ""
+  property string pendingBrowseUrl: ""
 
   readonly property var visibleRows: {
     var q = String(filterField.text).trim()
@@ -348,7 +387,15 @@ Panel {
   }
 
   function fetchBrowse(kind, url) {
-    if (browseProc.running) return
+    if (browseProc.running) {
+      // Navigation is allowed while the built-in country list is visible.
+      // Keep the latest intent and launch it as soon as the current request
+      // exits instead of silently dropping the click.
+      root.pendingBrowseKind = kind
+      root.pendingBrowseUrl = url
+      root.browsing = true
+      return
+    }
     root.browseKind = kind
     root.browseUrl = url
     root.browseNote = "Loading…"
@@ -481,6 +528,22 @@ Panel {
     }
   }
 
+  // Apply locally first so the bar updates on the click itself, then persist
+  // the merged entry through the shell. Keeping the host widget in sync also
+  // prevents it from injecting an older settings object back into this panel.
+  function persistSettings(values) {
+    var entry = { id: root.moduleName }
+    for (var existing in root.settings)
+      if (existing !== "id") entry[existing] = root.settings[existing]
+    for (var key in values) entry[key] = values[key]
+
+    root.settings = entry
+    if (root.hostWidget && "settings" in root.hostWidget)
+      root.hostWidget.settings = entry
+    if (root.bar && root.bar.shell && typeof root.bar.shell.updateEntryInline === "function")
+      root.bar.shell.updateEntryInline(root.moduleName, entry)
+  }
+
   function pickTeam(id, name) {
     root.browseNote = ""
     filterField.text = ""
@@ -527,6 +590,15 @@ Panel {
     running: false
     command: ["bash", "-c", 'printf \'url = "%s"\\n\' "$NM_URL" | curl -fsS --max-time 25 -K -']
     environment: ({ "NM_URL": root.browseUrl })
+    onRunningChanged: {
+      if (!running && root.pendingBrowseUrl !== "") {
+        var kind = root.pendingBrowseKind
+        var url = root.pendingBrowseUrl
+        root.pendingBrowseKind = ""
+        root.pendingBrowseUrl = ""
+        Qt.callLater(function() { root.fetchBrowse(kind, url) })
+      }
+    }
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.onBrowsed(text)

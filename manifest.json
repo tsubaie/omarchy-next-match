@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "tsubaie.next-match",
   "name": "Next Match",
-  "version": "0.1.0",
-  "author": "tsubaie",
+  "version": "1.0.0",
+  "author": "Talal A. Alsubaie",
   "license": "MIT",
-  "description": "Your team's next fixture in the bar, with their crest, counting down to kick-off.",
+  "description": "Your team's next fixture in the bar, both crests and a countdown, with live scores while it plays.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Next Match",
-    "description": "Your team's next fixture in the bar, with their crest, counting down to kick-off.",
+    "description": "Your team's next fixture in the bar, both crests and a countdown, with live scores while it plays.",
     "category": "Info",
     "allowMultiple": false,
     "defaultSection": "center",

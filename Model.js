@@ -323,6 +323,18 @@ function sides(fx, teamId) {
   }
 }
 
+// Unlike `sides`, which deliberately renders a fixture even for an unknown id,
+// cache/request validation must be strict: stale data for another team must
+// never be accepted after the setting changes.
+function fixtureHasTeam(fx, teamId) {
+  if (!fx || !fx.teams) return false
+  var id = parseInt(teamId, 10)
+  if (!isFinite(id) || id <= 0) return false
+  var home = fx.teams.home || {}
+  var away = fx.teams.away || {}
+  return parseInt(home.id, 10) === id || parseInt(away.id, 10) === id
+}
+
 // Merge search results into the browsed list, search hits first, scoped to the
 // country the user picked — they said which one they meant, so a Swedish club
 // answering a search for a Saudi one is noise. When that leaves nothing, the
@@ -603,6 +615,7 @@ if (typeof module !== "undefined") {
     kickoffMs: kickoffMs,
     shortCode: shortCode,
     sides: sides,
+    fixtureHasTeam: fixtureHasTeam,
     mergeTeams: mergeTeams,
     foreignOnly: foreignOnly,
     opponentBadge: opponentBadge,

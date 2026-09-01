@@ -136,4 +136,7 @@ owns only the button.
 
 ## Licence
 
-MIT
+MIT — see [LICENSE](LICENSE).
+
+Fixture data from [TheSportsDB](https://www.thesportsdb.com). Club crests are
+served by them and belong to the clubs.
