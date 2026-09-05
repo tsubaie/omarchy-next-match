@@ -15,6 +15,9 @@ BarWidget {
   // rich-text-parse a crafted setting out of shell.json.
   readonly property string icon: Model.plainText(setting("icon", "⚽"))
   readonly property bool hideWhenIdle: setting("hideWhenIdle", false) === true
+  // Compact: crest, "v", crest. Long: the club names too, and the hour on every
+  // day rather than only today (the slot text itself comes from the panel).
+  readonly property bool compact: setting("compact", true) === true
 
   readonly property string pillText: panelLoader.item ? panelLoader.item.pillLabel : ""
   readonly property bool configured: panelLoader.item ? panelLoader.item.configured : false
@@ -43,8 +46,10 @@ BarWidget {
   // the text was.
   readonly property string label: (concealSelf || root.quiet) ? "" : (pillText === "" ? "…" : pillText)
 
-  // A crest is drawn only once it has actually loaded; until then the row is
-  // just the names, which is better than a gap that pops.
+  // Compact, a crest stands in for its club's name: the bar is crest, "v",
+  // crest, then the slot, and a name is drawn only while its crest is not —
+  // before it has loaded, or with crests turned off — which is better than a
+  // gap that pops. Long, both names are always drawn beside their crests.
   readonly property bool homeBadgeReady: homeBadge.status === Image.Ready && root.homeBadgeUrl !== ""
   readonly property bool awayBadgeReady: awayBadge.status === Image.Ready && root.awayBadgeUrl !== ""
 
@@ -165,8 +170,8 @@ BarWidget {
       renderType: Text.NativeRendering
     }
 
-    // Home crest, home club, "v" or the score, away club, away crest, then the
-    // countdown or the clock.
+    // Home crest (or name), "v" or the score, away crest (or name), then the
+    // slot or the clock.
     Image {
       id: homeBadge
       anchors.verticalCenter: parent.verticalCenter
@@ -185,7 +190,7 @@ BarWidget {
 
     Text {
       anchors.verticalCenter: parent.verticalCenter
-      visible: root.showFixture
+      visible: root.showFixture && (!root.compact || !root.homeBadgeReady)
       text: root.homeName
       textFormat: Text.PlainText
       color: labelRow.ink
@@ -207,7 +212,7 @@ BarWidget {
 
     Text {
       anchors.verticalCenter: parent.verticalCenter
-      visible: root.showFixture
+      visible: root.showFixture && (!root.compact || !root.awayBadgeReady)
       text: root.awayName
       textFormat: Text.PlainText
       color: labelRow.ink

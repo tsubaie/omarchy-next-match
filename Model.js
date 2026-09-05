@@ -473,16 +473,23 @@ function countdown(ms) {
   return months + (months === 1 ? " month" : " months")
 }
 
-// Weekday + local time, e.g. "Sat 18:30". Built from the parts the caller
-// resolves, so the timezone decision stays outside this file.
-function whenLabel(parts) {
-  if (!parts) return ""
-  return parts.weekday + " " + parts.time
+// The slot as the bar shows it, from the parts the caller resolves so the
+// timezone decision stays outside this file. Compact, only today carries a
+// time: "Today 9:00PM" is what you are checking your evening against, while for
+// any other day the question is which day, and "Mon" answers it in three
+// characters where "Mon 9:00PM" spends the bar on an hour you will look up
+// again on the day. The long form keeps the hour on every day.
+function slotLabel(kind, weekday, time, compact) {
+  var day = kind === "today" ? "Today" : (kind === "tomorrow" ? "Tomorrow" : String(weekday || ""))
+  var t = String(time || "")
+  if (compact === false) return t === "" ? day : day + " " + t
+  if (kind === "today") return "Today " + t
+  return day
 }
 
-// Inside a week, a day and a time is what you actually plan around — "Sun
-// 08:30 PM" beats "in 5 days", which you would have to count out on a calendar.
-// Past a week the exact slot stops mattering and a rough distance reads better.
+// Inside a week, the day is what you actually plan around — "Sun" beats "in 5
+// days", which you would have to count out on a calendar. Past a week the exact
+// slot stops mattering and a rough distance reads better.
 var WEEK_MS = 7 * 24 * 3600 * 1000
 
 function timingLabel(deltaMs, whenText) {
@@ -506,7 +513,7 @@ function farOff(fx, nowMs) {
 }
 
 // "Today" and "Tomorrow" beat a weekday name for the two days you are most
-// likely to be asking about: on Tuesday, "Tue 09:00 PM" makes you check whether
+// likely to be asking about: on Tuesday, "Tue" makes you check whether
 // it means today or next week. Compared on local calendar days, not on elapsed
 // hours, so a match at 00:30 tonight is still "Tomorrow".
 function dayKind(koMs, nowMs) {
@@ -712,7 +719,7 @@ if (typeof module !== "undefined") {
     dayKind: dayKind,
     normalizeName: normalizeName,
     matchesQuery: matchesQuery,
-    whenLabel: whenLabel,
+    slotLabel: slotLabel,
     pillLabel: pillLabel,
     refreshMinutes: refreshMinutes,
     pickNextFixture: pickNextFixture,

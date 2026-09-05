@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "tsubaie.next-match",
   "name": "Next Match",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "Talal A. Alsubaie",
   "license": "MIT",
-  "description": "Your team's next fixture in the bar, both crests and a countdown, with live scores while it plays.",
+  "description": "Your team's next fixture in the bar: crest, v, crest and the day, with live scores while it plays.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Next Match",
-    "description": "Your team's next fixture in the bar, both crests and a countdown, with live scores while it plays.",
+    "description": "Your team's next fixture in the bar: crest, v, crest and the day, with live scores while it plays.",
     "category": "Info",
     "allowMultiple": false,
     "defaultSection": "center",
@@ -22,7 +22,8 @@
       "icon": "⚽",
       "refreshMinutes": 60,
       "showLive": true,
-      "showBadge": true
+      "showBadge": true,
+      "compact": true
     },
     "schema": [
       {
@@ -36,11 +37,18 @@
         "description": "TheSportsDB's numeric team id. You should not have to type this: click the widget, choose a country, then choose or search for your club."
       },
       {
+        "key": "compact",
+        "type": "boolean",
+        "label": "Compact",
+        "defaultValue": true,
+        "description": "On, the bar is crest, v, crest and the day, with the hour only on match day. Off, both club names are drawn beside their crests and every day carries its hour."
+      },
+      {
         "key": "showBadge",
         "type": "boolean",
         "label": "Show the club crest",
         "defaultValue": true,
-        "description": "Shows both clubs' crests in the bar. Off leaves the club names and score or fixture time without crests."
+        "description": "Shows both clubs' crests in the bar. Compact, they stand in for the club names; off, the names are drawn instead."
       },
       {
         "key": "showLive",

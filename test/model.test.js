@@ -100,7 +100,7 @@ eq(M.countdown(-5), "now", "past")
 
 console.log("pill")
 // Inside a week the widget shows the slot itself; past a week, a distance.
-const WHEN = "Sun 08:30 PM"
+const WHEN = "Sun"
 eq(M.timingLabel(2 * DAY, WHEN), WHEN, "two days out -> the day and time")
 eq(M.timingLabel(6 * DAY, WHEN), WHEN, "six days is still inside the week")
 eq(M.timingLabel(8 * DAY, WHEN), "in 1 week", "past a week -> a distance")
@@ -360,7 +360,7 @@ console.log("quiet past a week")
 
   // The boundary is the one the label already uses, so the pill never shows
   // "in 2 weeks": past a week it shows nothing at all.
-  eq(M.timingLabel(6 * DAY, "Sun 08:30 PM"), "Sun 08:30 PM", "inside a week, the slot")
+  eq(M.timingLabel(6 * DAY, "Sun"), "Sun", "inside a week, the slot")
   eq(M.farOff(at(8 * DAY), NOW), true, "past a week, quiet instead of a distance")
 }
 
@@ -376,6 +376,24 @@ console.log("today / tomorrow")
   eq(M.dayKind(at(2026, 8, 2, 23, 0), now), "tomorrow", "late tomorrow")
   eq(M.dayKind(at(2026, 8, 4, 21, 0), now), "other", "three days out gets a weekday")
   eq(M.dayKind(NaN, now), "other", "no date")
+}
+
+console.log("slot label")
+{
+  // Only today carries the hour. Any other day is the weekday alone: "Mon" is
+  // what the bar has room for, and the hour is panel material until the day.
+  eq(M.slotLabel("today", "Tue", "9:00PM"), "Today 9:00PM", "today, with the time")
+  eq(M.slotLabel("tomorrow", "Wed", "9:00PM"), "Tomorrow", "tomorrow, no time")
+  eq(M.slotLabel("other", "Mon", "9:00PM"), "Mon", "later in the week, weekday alone")
+  eq(M.slotLabel("other", "", ""), "", "nothing resolved")
+  eq(M.slotLabel("today", "Tue", undefined), "Today ", "a missing time does not throw")
+
+  // The long form keeps the hour on every day.
+  eq(M.slotLabel("today", "Tue", "9:00PM", false), "Today 9:00PM", "long: today")
+  eq(M.slotLabel("tomorrow", "Wed", "6:00PM", false), "Tomorrow 6:00PM", "long: tomorrow with the time")
+  eq(M.slotLabel("other", "Mon", "9:00PM", false), "Mon 9:00PM", "long: weekday with the time")
+  eq(M.slotLabel("other", "Mon", "", false), "Mon", "long: no time resolved, no trailing space")
+  eq(M.slotLabel("other", "Mon", "9:00PM", true), "Mon", "compact spelled out")
 }
 
 console.log("punctuation-insensitive matching")

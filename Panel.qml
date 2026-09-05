@@ -28,6 +28,9 @@ Panel {
   readonly property int teamId: Model.validTeamId(root.setting("teamId", 0))
   readonly property bool showLive: root.setting("showLive", true) === true
   readonly property bool showBadge: root.setting("showBadge", true) === true
+  // Compact: crests stand in for names and only today carries the hour. Long:
+  // both names on the bar and the hour on every day.
+  readonly property bool compact: root.setting("compact", true) === true
   readonly property int baseMinutes: {
     var n = parseInt(root.setting("refreshMinutes", 60), 10)
     return isFinite(n) && n >= 15 ? n : 60
@@ -158,15 +161,17 @@ Panel {
   }
 
 
-  // "Sun 08:30 PM" — the shape used while a match is inside a week.
+  // "Today 9:00PM", "Tomorrow" or "Sun" — the shape used while a match is
+  // inside a week. Compact, only today carries the hour; long, every day does.
+  // See Model.slotLabel.
   readonly property string whenText: {
     var ko = Model.kickoffMs(root.displayFixture)
     if (!isFinite(ko)) return ""
     var d = new Date(ko)
-    var kind = Model.dayKind(ko, root.nowMs)
-    var day = kind === "today" ? "Today"
-            : (kind === "tomorrow" ? "Tomorrow" : Qt.formatDateTime(d, "ddd"))
-    return day + " " + Qt.formatDateTime(d, "hh:mm AP")
+    return Model.slotLabel(Model.dayKind(ko, root.nowMs),
+                           Qt.formatDateTime(d, "ddd"),
+                           Qt.formatDateTime(d, "h:mmAP"),
+                           root.compact)
   }
 
   readonly property string pillLabel: {
@@ -1055,6 +1060,23 @@ Panel {
             font.family: root.fontFam
             font.pixelSize: Style.font.bodySmall
           }
+        }
+
+        // The one display choice worth a switch in the panel: the shell has no
+        // settings screen of its own for widget schemas, so without this the
+        // toggle would live only on the command line.
+        Toggle {
+          width: parent.width
+          visible: !root.settingsOpen && root.configured && root.errorText === ""
+          label: "Compact bar"
+          description: root.compact
+            ? "Crests, v, crests, and the day. The hour shows only on match day."
+            : "Club names beside the crests, and the hour on every day."
+          checked: root.compact
+          foreground: root.fg
+          accent: Color.accent
+          fontFamily: root.fontFam
+          onClicked: root.persistSettings({ compact: !root.compact })
         }
 
         PanelSeparator { width: parent.width }
