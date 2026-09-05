@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Omarchy plugin](https://img.shields.io/badge/omarchy-bar%20widget-8a2be2)](https://omarchy.org)
 
-<img src="docs/bar.png" alt="Al-Hilal crest, v, Neom crest, Mon — the pill in the Omarchy bar" width="150">
+<img src="docs/bar-compact.png" alt="Al-Hilal crest, v, Neom crest, Mon — the pill in the Omarchy bar" width="150">
 
 A bar widget for the [Omarchy](https://omarchy.org) shell. Pick your club and
 it just runs — **no API key, no account, nothing to paste.** Fixtures come from
@@ -52,7 +52,7 @@ here. Past a week it shows the icon alone.
 
 | Compact | Long |
 |---------|------|
-| <img src="docs/bar.png" alt="Compact: crest, v, crest, Mon" width="150"> | <img src="docs/bar-long.png" alt="Long: crest, Al-Hilal v Neom, crest, Mon 9:00PM" width="290"> |
+| <img src="docs/bar-compact.png" alt="Compact: crest, v, crest, Mon" width="150"> | <img src="docs/bar-long.png" alt="Long: crest, Al-Hilal v Neom, crest, Mon 9:00PM" width="290"> |
 
 Switch between them with the **Compact bar** toggle in the panel, or from a
 shell. Either way it applies at once, no restart:
@@ -71,7 +71,7 @@ names, kick-off in your local time to the minute, venue, home or away — plus
 the compact toggle and the team picker. Middle-click the pill to force a
 refresh.
 
-<img src="docs/panel.png" alt="The panel: Saudi-Arabian Pro League, Round 6, Al-Hilal v Neom with crests, Monday 7 September 09:00 PM, Kingdom Arena, Home, and the Compact bar toggle" width="376">
+<img src="docs/panel-compact.png" alt="The panel: Saudi-Arabian Pro League, Round 6, Al-Hilal v Neom with crests, Monday 7 September 09:00 PM, Kingdom Arena, Home, and the Compact bar toggle" width="376">
 
 ### Which competitions
 
