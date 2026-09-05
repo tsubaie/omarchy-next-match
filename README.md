@@ -35,6 +35,24 @@ Click the pill, pick a **country**, then pick your **club**. That is the whole
 setup. If your club is not in the list, type three letters of its name and the
 widget searches for it.
 
+## Remove
+
+```bash
+omarchy plugin remove tsubaie.next-match --yes
+```
+
+That takes the widget out of the bar and deletes the plugin folder. Your
+settings entry in `~/.config/omarchy/shell.json` goes with it. The only thing
+left behind is the cache of fixtures and crests, which you can delete too:
+
+```bash
+rm -rf ~/.cache/omarchy-next-match
+```
+
+The widget installs nothing else: no services, no system packages, no changes
+outside its own plugin folder and that cache. It runs `curl` for API calls and
+crest downloads, which Omarchy already ships.
+
 ## In the bar
 
 Crests sit either side of the `v` in both forms. Inside a week the bar shows the
